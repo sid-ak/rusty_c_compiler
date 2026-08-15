@@ -1,0 +1,78 @@
+name: CI
+
+# Apple Silicon, because the code generator's target and the differential oracle both assume macOS
+# on ARM64. There is no meaningful way to run this suite anywhere else.
+on:
+  push:
+  pull_request:
+
+# A new push supersedes the run before it on the same ref; there is nothing to learn from finishing
+# a run against code that has already been replaced.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  toolchain:
+    name: Toolchain preflight
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      # The build script shells out to clang to compile the runtime shim, and Phase 4's driver will
+      # shell out to it to assemble and link. Asserting it up front turns a missing toolchain into
+      # one clear failure here rather than a confusing linker error inside another job.
+      - name: Assert the C toolchain resolves
+        run: |
+          clang --version
+          xcrun --show-sdk-path
+
+      - name: Assert the pinned Rust toolchain installs
+        run: |
+          rustup show
+          cargo --version
+
+  fmt:
+    name: cargo fmt
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - run: cargo fmt --check
+
+  clippy:
+    name: cargo clippy
+    runs-on: macos-14
+    needs: toolchain
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets -- -D warnings
+
+  test:
+    name: cargo test
+    runs-on: macos-14
+    needs: toolchain
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test
+
+# Phase 5 adds two more jobs here, wired up by issue #38. They are named now so the shape of the
+# finished pipeline is visible, and so neither is quietly forgotten.
+#
+#  differential:
+#    The clang-oracle suite, one test per corpus program:
+#      cargo test --test differential
+#    See https://github.com/sid-ak/rusty_c_compiler/issues/33
+#
+#  fuzz:
+#    A long run of the lex, parse, and frontend targets on nightly, triggered by `on: schedule`
+#    rather than by a push, because it is measured in minutes per target rather than seconds:
+#      cargo +nightly fuzz run <target>
+#    See https://github.com/sid-ak/rusty_c_compiler/issues/37

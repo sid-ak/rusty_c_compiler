@@ -1,0 +1,10 @@
+# Pinned exactly, not to "stable", so a local run and a CI run compile with the same compiler and
+# lint with the same clippy. A new stable release otherwise turns up first as a red CI run on a
+# change that has nothing to do with it.
+#
+# Nightly is not pinned here: it is needed only for cargo-fuzz, which is invoked explicitly with
+# `cargo +nightly`.
+[toolchain]
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
