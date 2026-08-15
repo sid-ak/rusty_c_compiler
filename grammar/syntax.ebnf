@@ -1,0 +1,36 @@
+program        = { global_decl } ;
+global_decl    = func_def | func_decl | var_decl ;
+
+func_def       = type ident "(" params ")" block ;
+func_decl      = type ident "(" params ")" ";" ;
+params         = "void" | [ param { "," param } ] ;
+param          = type ident [ "[" "]" ] ;
+
+var_decl       = type ident [ "[" int_lit "]" ] [ "=" initializer ] ";" ;
+initializer    = expr | "{" [ expr { "," expr } ] "}" ;
+
+type           = "int" | "char" | "void" ;
+
+block          = "{" { block_item } "}" ;
+block_item     = var_decl | stmt ;
+stmt           = block
+               | "if" "(" expr ")" stmt [ "else" stmt ]
+               | "while" "(" expr ")" stmt
+               | "for" "(" [ for_init ] ";" [ expr ] ";" [ expr ] ")" stmt
+               | "return" [ expr ] ";"
+               | "break" ";"
+               | "continue" ";"
+               | [ expr ] ";" ;
+for_init       = var_decl_no_semi | expr ;
+
+expr           = assignment ;
+assignment     = ident_or_index "=" assignment | logical_or ;
+logical_or     = logical_and { "||" logical_and } ;
+logical_and    = equality { "&&" equality } ;
+equality       = relational { ( "==" | "!=" ) relational } ;
+relational     = additive { ( "<" | ">" | "<=" | ">=" ) additive } ;
+additive       = multiplicative { ( "+" | "-" ) multiplicative } ;
+multiplicative = unary { ( "*" | "/" | "%" ) unary } ;
+unary          = ( "-" | "!" | "+" | "++" | "--" ) unary | postfix ;
+postfix        = primary { "[" expr "]" | "(" args ")" | "++" | "--" } ;
+primary        = int_lit | char_lit | string_lit | ident | "(" expr ")" ;

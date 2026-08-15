@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 604" width="1040" height="604"
+     role="img" aria-label="Rusty C Compiler architecture: lexer, parser, semantic analysis and code generation feed the toolchain driver, which links against the runtime shim; a differential testing lane compares the result against clang -O0.">
+  <title>Rusty C Compiler architecture</title>
+  <desc>Three lanes. Lane one is the compiler pipeline inside mycc: program.c to lexer to parser to
+  semantic analysis to code generator to program.s, with every pass reporting into a shared
+  DiagnosticBag. Lane two is the toolchain driver: program.s assembled by clang into program.o and
+  linked with runtime/shim.o into an executable. Lane three is differential testing: the same
+  program.c compiled by clang -O0 against the same shim, with both executables' stdout, stderr and
+  exit status compared.</desc>
+
+  <defs>
+    <style>
+      .lane      { fill: #f8fafc; stroke: #e2e8f0; stroke-width: 1; }
+      .laneTitle { font: 600 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: #475569; }
+      .lbl       { font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+      .sub       { font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .mono      { font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .edge      { font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: #64748b; }
+      .pass      { fill: #e0e7ff; stroke: #4f46e5; stroke-width: 1.5; }
+      .passTxt   { fill: #1e1b4b; }
+      .passSub   { fill: #4f46e5; }
+      .art       { fill: #ffffff; stroke: #94a3b8; stroke-width: 1.5; stroke-dasharray: 5 3; }
+      .artTxt    { fill: #334155; }
+      .ext       { fill: #d1fae5; stroke: #059669; stroke-width: 1.5; }
+      .extTxt    { fill: #064e3b; }
+      .extSub    { fill: #047857; }
+      .cmp       { fill: #ffedd5; stroke: #ea580c; stroke-width: 1.5; }
+      .cmpTxt    { fill: #7c2d12; }
+      .diag      { fill: #fef9c3; stroke: #ca8a04; stroke-width: 1.5; }
+      .diagTxt   { fill: #713f12; }
+      .flow      { stroke: #475569; stroke-width: 1.6; fill: none; }
+      .hand      { stroke: #94a3b8; stroke-width: 1.4; fill: none; stroke-dasharray: 5 4; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrowSoft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1040" height="604" fill="#ffffff"/>
+
+  <!-- ================= Lane 1: compiler pipeline ================= -->
+  <rect class="lane" x="8" y="36" width="1024" height="216" rx="10"/>
+  <text class="laneTitle" x="24" y="60">Compiler pipeline — one process, four passes over an immutable AST</text>
+
+  <text class="edge" x="180" y="96" text-anchor="middle">bytes</text>
+  <text class="edge" x="352" y="96" text-anchor="middle">tokens</text>
+  <text class="edge" x="524" y="96" text-anchor="middle">AST</text>
+  <text class="edge" x="696" y="96" text-anchor="middle">AST + types</text>
+  <text class="edge" x="868" y="96" text-anchor="middle">asm text</text>
+
+  <rect class="art"  x="24"  y="104" width="140" height="60" rx="7"/>
+  <text class="mono artTxt" x="94" y="139" text-anchor="middle">program.c</text>
+
+  <rect class="pass" x="196" y="104" width="140" height="60" rx="7"/>
+  <text class="lbl passTxt" x="266" y="130" text-anchor="middle">Lexer</text>
+  <text class="sub passSub" x="266" y="148" text-anchor="middle">src/lexer</text>
+
+  <rect class="pass" x="368" y="104" width="140" height="60" rx="7"/>
+  <text class="lbl passTxt" x="438" y="130" text-anchor="middle">Parser</text>
+  <text class="sub passSub" x="438" y="148" text-anchor="middle">src/parser</text>
+
+  <rect class="pass" x="540" y="104" width="140" height="60" rx="7"/>
+  <text class="lbl passTxt" x="610" y="130" text-anchor="middle">Semantic analysis</text>
+  <text class="sub passSub" x="610" y="148" text-anchor="middle">src/sema</text>
+
+  <rect class="pass" x="712" y="104" width="140" height="60" rx="7"/>
+  <text class="lbl passTxt" x="782" y="130" text-anchor="middle">Code generator</text>
+  <text class="sub passSub" x="782" y="148" text-anchor="middle">src/codegen</text>
+
+  <rect class="art"  x="884" y="104" width="140" height="60" rx="7"/>
+  <text class="mono artTxt" x="954" y="139" text-anchor="middle">program.s</text>
+
+  <path class="flow" marker-end="url(#arrow)" d="M 168 134 H 190"/>
+  <path class="flow" marker-end="url(#arrow)" d="M 340 134 H 362"/>
+  <path class="flow" marker-end="url(#arrow)" d="M 512 134 H 534"/>
+  <path class="flow" marker-end="url(#arrow)" d="M 684 134 H 706"/>
+  <path class="flow" marker-end="url(#arrow)" d="M 856 134 H 878"/>
+
+  <rect class="diag" x="196" y="200" width="484" height="40" rx="7"/>
+  <text class="lbl diagTxt" x="438" y="225" text-anchor="middle">DiagnosticBag — spans, line/column, caret rendering. No pass panics.</text>
+  <path class="hand" marker-end="url(#arrowSoft)" d="M 266 164 V 196"/>
+  <path class="hand" marker-end="url(#arrowSoft)" d="M 438 164 V 196"/>
+  <path class="hand" marker-end="url(#arrowSoft)" d="M 610 164 V 196"/>
+
+  <!-- ================= Lane 2: driver ================= -->
+  <rect class="lane" x="8" y="268" width="1024" height="196" rx="10"/>
+  <text class="laneTitle" x="24" y="292">Toolchain driver — src/driver.rs shells out to the Xcode Command Line Tools</text>
+
+  <rect class="art"  x="24"  y="316" width="150" height="56" rx="7"/>
+  <text class="mono artTxt" x="99" y="349" text-anchor="middle">program.s</text>
+
+  <rect class="ext"  x="214" y="316" width="150" height="56" rx="7"/>
+  <text class="lbl extTxt" x="289" y="341" text-anchor="middle">clang -c</text>
+  <text class="sub extSub" x="289" y="359" text-anchor="middle">assemble</text>
+
+  <rect class="art"  x="404" y="316" width="150" height="56" rx="7"/>
+  <text class="mono artTxt" x="479" y="349" text-anchor="middle">program.o</text>
+
+  <rect class="ext"  x="594" y="316" width="150" height="56" rx="7"/>
+  <text class="lbl extTxt" x="669" y="341" text-anchor="middle">clang</text>
+  <text class="sub extSub" x="669" y="359" text-anchor="middle">link</text>
+
+  <rect class="art"  x="784" y="316" width="150" height="56" rx="7"/>
+  <text class="mono artTxt" x="859" y="349" text-anchor="middle">./program</text>
+
+  <path class="flow" marker-end="url(#arrow)" d="M 178 344 H 208"/>
+  <path class="flow" marker-end="url(#arrow)" d="M 368 344 H 398"/>
+  <path class="flow" marker-end="url(#arrow)" d="M 558 344 H 588"/>
+  <path class="flow" marker-end="url(#arrow)" d="M 748 344 H 778"/>
+
+  <rect class="art" x="594" y="396" width="150" height="44" rx="7"/>
+  <text class="mono artTxt" x="669" y="423" text-anchor="middle">runtime/shim.o</text>
+  <path class="flow" marker-end="url(#arrow)" d="M 669 396 V 378"/>
+
+  <!-- handoff from lane 1 to lane 2 -->
+  <path class="hand" marker-end="url(#arrowSoft)" d="M 954 168 V 262 H 99 V 310"/>
+
+  <!-- ================= Lane 3: differential testing ================= -->
+  <rect class="lane" x="8" y="480" width="1024" height="112" rx="10"/>
+  <text class="laneTitle" x="24" y="504">Differential testing — clang -O0 is the oracle, the same shim on both sides</text>
+
+  <rect class="art"  x="24"  y="522" width="140" height="52" rx="7"/>
+  <text class="mono artTxt" x="94" y="553" text-anchor="middle">program.c</text>
+
+  <rect class="ext"  x="204" y="522" width="170" height="52" rx="7"/>
+  <text class="lbl extTxt" x="289" y="546" text-anchor="middle">clang -O0</text>
+  <text class="sub extSub" x="289" y="563" text-anchor="middle">+ runtime/shim.o</text>
+
+  <rect class="art"  x="414" y="522" width="180" height="52" rx="7"/>
+  <text class="mono artTxt" x="504" y="553" text-anchor="middle">./program_clang</text>
+
+  <rect class="cmp"  x="634" y="522" width="290" height="52" rx="7"/>
+  <text class="lbl cmpTxt" x="779" y="546" text-anchor="middle">compare stdout, stderr,</text>
+  <text class="lbl cmpTxt" x="779" y="564" text-anchor="middle">exit status (masked to 8 bits)</text>
+
+  <path class="flow" marker-end="url(#arrow)" d="M 168 548 H 198"/>
+  <path class="flow" marker-end="url(#arrow)" d="M 378 548 H 408"/>
+  <path class="flow" marker-end="url(#arrow)" d="M 598 548 H 628"/>
+  <path class="flow" marker-end="url(#arrow)" d="M 859 376 V 498 H 779 V 516"/>
+</svg>

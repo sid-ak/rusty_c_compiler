@@ -1,0 +1,86 @@
+site_name: Rusty C Compiler
+site_description: A compiler for a subset of C, written in Rust, targeting ARM64 macOS.
+site_author: Sidharth Anandkumar
+repo_url: https://github.com/sid-ak/rusty_c_compiler
+repo_name: sid-ak/rusty_c_compiler
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+site_dir: site
+
+# dive-deep/ holds fragments embedded into architecture.md via pymdownx.snippets, not standalone
+# pages — their links are written to resolve from architecture.md's location, so they must never be
+# built as pages of their own.
+plugins:
+  - search
+  - exclude:
+      glob:
+        - dive-deep/*
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Pragmatic Testing: PRAGMATIC_TESTING.md
+  - Implementation Plan: PLAN.md
+  - Decisions:
+      - Overview: decisions/index.md
+      - 0001 — Subset of C, clang as oracle: decisions/0001-subset-of-c-with-clang-as-oracle.md
+      - 0002 — Rust as implementation language: decisions/0002-rust-as-implementation-language.md
+      - 0003 — Single target, ARM64 macOS: decisions/0003-single-target-arm64-macos.md
+      - 0004 — Immutable AST, side-table annotations: decisions/0004-immutable-ast-with-side-table-annotations.md
+      - 0005 — Stack spilling, not register allocation: decisions/0005-stack-spilling-instead-of-register-allocation.md
+      - 0006 — Fixed-arity runtime shim: decisions/0006-fixed-arity-runtime-shim.md
+      - 0007 — Array decay at the parameter boundary: decisions/0007-array-decay-only-at-parameter-boundary.md
+      - 0008 — Reject undefined behavior: decisions/0008-reject-undefined-behavior.md
+      - 0009 — clang as assembler and linker: decisions/0009-clang-as-assembler-and-linker.md
+  - Proposal: PROPOSAL.md
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.instant
+    - navigation.top
+    - navigation.tracking
+    - toc.follow
+    - content.code.copy
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify {kwds: {case: lower}}
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.snippets
+
+# A broken internal link or a page missing from the nav fails the build.
+strict: true
+validation:
+  omitted_files: warn
+  absolute_links: info
+  unrecognized_links: warn
+  anchors: warn

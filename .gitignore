@@ -1,0 +1,14 @@
+# Rust
+/target/
+
+# Documentation site
+/site/
+/.venv/
+
+# Fuzzing
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+
+# macOS
+.DS_Store
