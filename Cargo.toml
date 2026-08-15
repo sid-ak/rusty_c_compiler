@@ -1,0 +1,19 @@
+[package]
+name = "mycc"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "A compiler for a subset of C, emitting ARM64 assembly for Apple Silicon macOS"
+repository = "https://github.com/sid-ak/rusty_c_compiler"
+publish = false
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+
+# The no-panic invariant in docs/architecture.md, enforced by the compiler rather than by review.
+# Tests are exempted through clippy.toml, so this list is stated once.
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"

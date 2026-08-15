@@ -1,0 +1,6 @@
+# The panic-adjacent lints denied in Cargo.toml are denied for compiler code only. Test code is
+# allowed to unwrap and index freely: a panic there is a failing test, which is the point.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
