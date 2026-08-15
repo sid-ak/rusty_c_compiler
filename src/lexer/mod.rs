@@ -263,9 +263,15 @@ impl Lexer<'_> {
         match i32::try_from(value) {
             Ok(value) => TokenKind::IntLit(value),
             Err(_) => {
-                self.error(
-                    span,
-                    format!("integer literal is too large for 'int': {value}"),
+                // The literal's own text, not the accumulated value: accumulation saturates, so a
+                // very long literal would otherwise be reported as some unrelated round number.
+                let text = self.text(span);
+                self.report(
+                    Diagnostic::lex(
+                        span,
+                        format!("integer literal is too large for 'int': {text}"),
+                    )
+                    .with_note("the maximum is 2147483647; write INT_MIN as -2147483647 - 1"),
                 );
                 TokenKind::IntLit(0)
             }
@@ -286,7 +292,10 @@ impl Lexer<'_> {
         } else if bytes.is_empty() {
             self.error(span, "empty character literal".to_string());
         } else if bytes.len() > 1 {
-            self.error(span, "character literal must be one character".to_string());
+            self.error(
+                span,
+                "character literal must contain exactly one character".to_string(),
+            );
         }
 
         TokenKind::CharLit(bytes.first().copied().unwrap_or(0))
@@ -419,6 +428,11 @@ impl Lexer<'_> {
     fn slice(&self, start: usize, end: usize) -> &[u8] {
         self.source.get(start..end).unwrap_or_default()
     }
+
+    /// The source text `span` covers, for quoting a construct back in its own diagnostic.
+    fn text(&self, span: Span) -> String {
+        String::from_utf8_lossy(self.slice(span.start, span.end)).into_owned()
+    }
 }
 
 /// Whether `byte` can start an identifier.
@@ -457,6 +471,8 @@ mod tests {
     use super::*;
 
     use std::path::Path;
+
+    use crate::diagnostics::DiagnosticKind;
 
     /// Lex `source`, asserting it produced no diagnostics, and return its kinds without the `Eof`.
     fn kinds(source: &str) -> Vec<TokenKind> {
@@ -785,6 +801,227 @@ mod tests {
             lexed.tokens.last().map(|token| &token.kind),
             Some(&TokenKind::Eof)
         );
+    }
+
+    /// Assert `source` produces exactly one lexing diagnostic reading `message`, whose span covers
+    /// `offending` — the whole malformed construct, not just the byte that gave it away — and that
+    /// the scan still reached `Eof`.
+    fn assert_one_error(source: &str, message: &str, offending: &str) {
+        let lexed = lex(source.as_bytes());
+
+        assert_eq!(
+            lexed.diagnostics.len(),
+            1,
+            "for {source:?}, got: {:?}",
+            lexed.diagnostics
+        );
+        let diagnostic = lexed
+            .diagnostics
+            .first()
+            .expect("the length was just asserted");
+
+        assert_eq!(diagnostic.kind, DiagnosticKind::Lex, "for {source:?}");
+        assert_eq!(diagnostic.message, message, "for {source:?}");
+        assert_eq!(
+            source
+                .as_bytes()
+                .get(diagnostic.span.start..diagnostic.span.end),
+            Some(offending.as_bytes()),
+            "for {source:?}, the span should cover the whole offending construct"
+        );
+        assert_eq!(
+            lexed.tokens.last().map(|token| &token.kind),
+            Some(&TokenKind::Eof),
+            "for {source:?}, scanning must still reach the end"
+        );
+    }
+
+    /// Every malformed-input path reports its own diagnostic, spanning the whole construct.
+    #[test]
+    fn each_malformed_construct_has_its_own_diagnostic() {
+        let cases = [
+            ("\"abc", "unterminated string literal", "\"abc"),
+            ("\"abc\ndone", "unterminated string literal", "\"abc"),
+            ("'a", "unterminated character literal", "'a"),
+            ("''", "empty character literal", "''"),
+            (
+                "'ab'",
+                "character literal must contain exactly one character",
+                "'ab'",
+            ),
+            (r"'\q'", r"unknown escape sequence '\q'", r"\q"),
+            (r#""a\qb""#, r"unknown escape sequence '\q'", r"\q"),
+            ("/* open", "unterminated block comment", "/* open"),
+            ("0x", "expected digits after '0x'", "0x"),
+            ("0xzz", "invalid digit 'z' in hexadecimal literal", "0xzz"),
+            ("08", "invalid digit '8' in octal literal", "08"),
+            ("12ab", "invalid digit 'a' in decimal literal", "12ab"),
+            (
+                "2147483648",
+                "integer literal is too large for 'int': 2147483648",
+                "2147483648",
+            ),
+            (
+                "99999999999999999999999",
+                "integer literal is too large for 'int': 99999999999999999999999",
+                "99999999999999999999999",
+            ),
+            ("@", "stray '@' in program", "@"),
+            ("$", "stray '$' in program", "$"),
+            ("#", "stray '#' in program", "#"),
+            ("`", "stray '`' in program", "`"),
+            ("&", "'&' is not supported in this C subset", "&"),
+            ("|", "'|' is not supported in this C subset", "|"),
+        ];
+
+        for (source, message, offending) in cases {
+            assert_one_error(source, message, offending);
+        }
+    }
+
+    /// The unsupported bitwise operators say what to write instead.
+    #[test]
+    fn lone_bitwise_operators_suggest_the_doubled_form() {
+        let lexed = lex(b"a & b");
+        let diagnostic = lexed.diagnostics.first().expect("expected a diagnostic");
+
+        assert_eq!(diagnostic.notes, ["did you mean '&&'?"]);
+    }
+
+    /// An over-large literal says what the limit is and how to write `INT_MIN` within it.
+    #[test]
+    fn integer_overflow_explains_the_limit() {
+        let lexed = lex(b"2147483648");
+        let diagnostic = lexed.diagnostics.first().expect("expected a diagnostic");
+
+        assert_eq!(
+            diagnostic.notes,
+            ["the maximum is 2147483647; write INT_MIN as -2147483647 - 1"]
+        );
+    }
+
+    /// One bad construct produces one diagnostic, not a cascade.
+    #[test]
+    fn a_single_error_does_not_cascade() {
+        for source in [r"'\q'", "0x", "'ab'", "\"unterminated"] {
+            assert_eq!(
+                lex(source.as_bytes()).diagnostics.len(),
+                1,
+                "for {source:?}"
+            );
+        }
+    }
+
+    /// An unterminated literal resynchronizes at the end of its line, so the next line still lexes.
+    #[test]
+    fn scanning_resumes_on_the_line_after_an_unterminated_literal() {
+        let lexed = lex(b"\"oops\nint x;\n");
+
+        assert_eq!(lexed.diagnostics.len(), 1);
+        let kinds: Vec<_> = lexed.tokens.iter().map(|token| &token.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                &TokenKind::StrLit(b"oops".to_vec()),
+                &TokenKind::Keyword(Keyword::Int),
+                &TokenKind::Ident("x".into()),
+                &TokenKind::Semi,
+                &TokenKind::Eof,
+            ]
+        );
+    }
+
+    /// An unterminated block comment resynchronizes at end of file, swallowing the rest.
+    #[test]
+    fn an_unterminated_block_comment_runs_to_the_end_of_file() {
+        let lexed = lex(b"int x;\n/* oops\nint y;\n");
+
+        assert_eq!(lexed.diagnostics.len(), 1);
+        let kinds: Vec<_> = lexed.tokens.iter().map(|token| &token.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                &TokenKind::Keyword(Keyword::Int),
+                &TokenKind::Ident("x".into()),
+                &TokenKind::Semi,
+                &TokenKind::Eof,
+            ]
+        );
+    }
+
+    /// A file with several mistakes reports all of them, in source order.
+    #[test]
+    fn several_errors_are_reported_in_source_order() {
+        let source = b"int a = 0x;\nchar c = '';\nint b = @;\nchar *s = \"open\n";
+        let lexed = lex(source);
+
+        let messages: Vec<_> = lexed
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+        assert_eq!(
+            messages,
+            [
+                "expected digits after '0x'",
+                "empty character literal",
+                "stray '@' in program",
+                "unterminated string literal",
+            ]
+        );
+
+        let offsets: Vec<_> = lexed
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.span.start)
+            .collect();
+        let mut sorted = offsets.clone();
+        sorted.sort_unstable();
+        assert_eq!(offsets, sorted, "diagnostics must come out in source order");
+    }
+
+    /// A file of nothing but stray characters terminates, reporting one error per character.
+    #[test]
+    fn a_file_of_stray_characters_terminates() {
+        let lexed = lex(b"@$#`@$#`");
+
+        assert_eq!(lexed.diagnostics.len(), 8);
+        assert_eq!(
+            lexed
+                .tokens
+                .iter()
+                .map(|token| &token.kind)
+                .collect::<Vec<_>>(),
+            [&TokenKind::Eof],
+            "stray characters produce no tokens"
+        );
+    }
+
+    /// An error path cannot loop: repeated unterminated constructs still reach the end.
+    #[test]
+    fn repeated_errors_still_terminate() {
+        let lexed = lex(b"'\n'\n'\n'\n\"\n\"\n\"\n");
+
+        assert!(!lexed.diagnostics.is_empty());
+        assert_eq!(
+            lexed.tokens.last().map(|token| &token.kind),
+            Some(&TokenKind::Eof)
+        );
+    }
+
+    /// A backslash at the very end of a file is an unterminated literal, not an overrun.
+    #[test]
+    fn a_trailing_backslash_does_not_overrun() {
+        for source in [r"'\", r#""\"#, r"'", r#"""#] {
+            let lexed = lex(source.as_bytes());
+
+            assert_eq!(lexed.diagnostics.len(), 1, "for {source:?}");
+            assert_eq!(
+                lexed.tokens.last().map(|token| &token.kind),
+                Some(&TokenKind::Eof),
+                "for {source:?}"
+            );
+        }
     }
 
     /// Spans are byte ranges over the original source, so slicing one back out gives the token.
