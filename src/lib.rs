@@ -20,7 +20,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::cli::Options;
-use crate::diagnostics::Diagnostic;
+use crate::diagnostics::{Diagnostic, SourceMap};
 
 /// What a compilation run produced, as far as [`cli::Options::stage`] asked it to go.
 ///
@@ -106,8 +106,9 @@ pub fn run(options: &Options) -> Result<(), Error> {
             Ok(())
         }
         Err(diagnostics) => {
+            let source_map = SourceMap::new(&options.input, &source);
             for diagnostic in &diagnostics {
-                eprintln!("{}: error: {}", options.input.display(), diagnostic.message);
+                eprintln!("{}", source_map.render(diagnostic));
             }
             Err(Error::Rejected {
                 count: diagnostics.len(),

@@ -10,6 +10,9 @@ publish = false
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 
+[dev-dependencies]
+insta = "1.43"
+
 # The no-panic invariant in docs/architecture.md, enforced by the compiler rather than by review.
 # Tests are exempted through clippy.toml, so this list is stated once.
 [lints.clippy]
