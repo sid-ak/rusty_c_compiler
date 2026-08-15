@@ -13,6 +13,7 @@
 
 pub mod cli;
 pub mod diagnostics;
+pub mod lexer;
 
 use std::fmt;
 use std::fs;
