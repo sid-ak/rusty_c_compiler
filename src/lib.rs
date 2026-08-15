@@ -20,7 +20,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::cli::Options;
+use crate::cli::{Options, Stage};
 use crate::diagnostics::{Diagnostic, SourceMap};
 
 /// What a compilation run produced, as far as [`cli::Options::stage`] asked it to go.
@@ -88,7 +88,19 @@ pub fn compile(
     path: &Path,
     options: &Options,
 ) -> Result<Artifacts, Vec<Diagnostic>> {
-    let _ = (source, path, options);
+    let lexed = lexer::lex(source);
+    if !lexed.diagnostics.is_empty() {
+        return Err(lexed.diagnostics);
+    }
+
+    if options.stage() == Stage::Tokens {
+        let source_map = SourceMap::new(path, source);
+
+        return Ok(Artifacts {
+            dump: Some(lexer::dump(&source_map, &lexed.tokens)),
+        });
+    }
+
     Ok(Artifacts::default())
 }
 
