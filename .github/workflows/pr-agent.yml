@@ -9,7 +9,11 @@ name: PR Agent (Gemini)
 on:
   pull_request:
     types: [opened, reopened, ready_for_review]
+    branches: [main]
   issue_comment:
+    # `created` only. Left unset it defaults to created, edited, and deleted, so editing or
+    # deleting any comment on any issue started a runner that found no command and exited.
+    types: [created]
 
 jobs:
   pr_agent_job:
@@ -55,6 +59,11 @@ jobs:
           # first (404, "no longer available to new users") and 2.5-flash-lite the second.
           config.model: "gemini/gemini-3.7-flash"
           config.fallback_models: '["gemini/gemini-3.5-flash-lite"]'
+          # pr-agent caps context at 32000 tokens by default, "regardless of the model's
+          # default capabilities", which silently drops most files from a large review. These
+          # models have a 1M window, so the cap was throwing away context that was paid for
+          # and available. Left below the full window to leave room for the response.
+          config.max_model_tokens: "900000"
           GOOGLE_AI_STUDIO.GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # Auto-run on new/updated PRs.
           github_action_config.auto_review: "true"
