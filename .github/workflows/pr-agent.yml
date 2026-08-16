@@ -1,0 +1,62 @@
+name: PR Agent (Gemini)
+
+# Automated pull request review, description, and improvement suggestions.
+#
+# Note the triggers: a review runs when a PR is opened, reopened, or marked ready for review, and
+# when someone comments a command such as /review or /improve. `synchronize` is deliberately absent,
+# so pushing more commits to an open PR does not re-run the whole review and consume quota on every
+# push — comment /review to ask for another pass.
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+  issue_comment:
+
+jobs:
+  pr_agent_job:
+    # Only people with write access to this repository can start a run.
+    #
+    # This repository is public, so without the association check any GitHub user could spend the
+    # Gemini quota by commenting on an issue, and the `sender.type != 'Bot'` guard does not help —
+    # it excludes bots, not strangers. `author_association` is GitHub's own answer to "what is this
+    # person to this repository", and OWNER, MEMBER, and COLLABORATOR are the three values that mean
+    # write access. A pull_request event carries the association on the pull request and an
+    # issue_comment event carries it on the comment, so the `||` picks whichever one this event has.
+    if: >-
+      ${{
+        github.event.sender.type != 'Bot'
+        && !github.event.pull_request.draft
+        && contains(
+             fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
+             github.event.comment.author_association || github.event.pull_request.author_association
+           )
+      }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: write
+      checks: write
+    name: Run PR Agent (Gemini free tier) on pull requests and comments
+    steps:
+      - name: PR Agent action step
+        # Pinned to a full commit SHA rather than a tag or a branch. This job holds
+        # `contents: write`, so whatever this reference resolves to can write to the repository —
+        # and a branch moves with every push while a tag can be repointed at any time, so neither
+        # is a promise about what will actually run. A SHA is. The trailing comment carries the
+        # human-readable version, which is also what Dependabot reads when it offers a bump.
+        uses: the-pr-agent/pr-agent@f6af7d77554ff8d26adffded077e6461329e92fa # v0.42.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Free-tier Gemini models via Google AI Studio — no OpenAI cost.
+          #
+          # Both names have to satisfy two independent constraints: Google must still serve the
+          # model to new API keys, and pr-agent must have a token limit registered for it in
+          # MAX_TOKENS, or it fails before it ever calls the API. gemini-2.5-flash fails the
+          # first (404, "no longer available to new users") and 2.5-flash-lite the second.
+          config.model: "gemini/gemini-3.7-flash"
+          config.fallback_models: '["gemini/gemini-3.5-flash-lite"]'
+          GOOGLE_AI_STUDIO.GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Auto-run on new/updated PRs.
+          github_action_config.auto_review: "true"
+          github_action_config.auto_describe: "true"
+          github_action_config.auto_improve: "true"
