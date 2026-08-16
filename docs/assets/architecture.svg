@@ -2,7 +2,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 604" width="1040" height="604"
      role="img" aria-label="Rusty C Compiler architecture: lexer, parser, semantic analysis and code generation feed the toolchain driver, which links against the runtime shim; a differential testing lane compares the result against clang -O0.">
   <title>Rusty C Compiler architecture</title>
-  <desc>Three lanes. Lane one is the compiler pipeline inside mycc: program.c to lexer to parser to
+  <desc>Three lanes. Lane one is the compiler pipeline inside rustycc: program.c to lexer to parser to
   semantic analysis to code generator to program.s, with every pass reporting into a shared
   DiagnosticBag. Lane two is the toolchain driver: program.s assembled by clang into program.o and
   linked with runtime/shim.o into an executable. Lane three is differential testing: the same

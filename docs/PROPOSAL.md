@@ -61,7 +61,7 @@ system assembler and linker (via Xcode Command Line Tools) to produce a native m
 
 ### Command-line driver
 
-`mycc program.c -o program`, mirroring the usage of a real compiler, to keep test scripts and the
+`rustycc program.c -o program`, mirroring the usage of a real compiler, to keep test scripts and the
 grading demo straightforward.
 
 ## Testing Plan

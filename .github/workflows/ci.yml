@@ -1,0 +1,111 @@
+name: CI
+
+# Apple Silicon, because the code generator's target and the differential oracle both assume macOS
+# on ARM64. There is no meaningful way to run this suite anywhere else.
+#
+# `push` is limited to main so that a branch with an open pull request is not checked twice. An
+# unfiltered `push` plus `pull_request` runs every job once for each event, against the same commit,
+# which doubles the wall-clock and the runner minutes and reports each result twice on the pull
+# request. Between the two, `pull_request` is the one worth keeping for branches: it is what the
+# merge is gated on. `push` still covers main, so a merge or a direct commit there is checked.
+#
+# The cost is that a branch with no pull request open is not built. That is the intended trade:
+# opening the pull request is what asks for the check.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push supersedes the run before it on the same ref; there is nothing to learn from finishing
+# a run against code that has already been replaced.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  toolchain:
+    name: Toolchain preflight
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      # The build script shells out to clang to compile the runtime shim, and Phase 4's driver will
+      # shell out to it to assemble and link. Asserting it up front turns a missing toolchain into
+      # one clear failure here rather than a confusing linker error inside another job.
+      - name: Assert the C toolchain resolves
+        run: |
+          clang --version
+          xcrun --show-sdk-path
+
+      - name: Assert the pinned Rust toolchain installs
+        run: |
+          rustup show
+          cargo --version
+
+  fmt:
+    name: cargo fmt
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - run: cargo fmt --check
+
+  clippy:
+    name: cargo clippy
+    runs-on: macos-14
+    needs: toolchain
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets -- -D warnings
+
+  test:
+    name: cargo test
+    runs-on: macos-14
+    needs: toolchain
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test
+
+  docs:
+    name: docs
+    runs-on: macos-14
+    needs: toolchain
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+
+      # Runs the same script a contributor runs, so what CI checks and what can be reproduced
+      # locally cannot drift. It fails on a broken internal link, a page missing from the nav, and
+      # on a rustdoc link pointing at an item that no longer exists — the last of which
+      # `#![deny(missing_docs)]` cannot catch, since the doc comment is present, only stale.
+      - name: Build the prose site and the API reference
+        run: ./scripts/build-docs.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: site/
+          retention-days: 7
+
+# Phase 5 adds two more jobs here, wired up by issue #38. They are named now so the shape of the
+# finished pipeline is visible, and so neither is quietly forgotten.
+#
+#  differential:
+#    The clang-oracle suite, one test per corpus program:
+#      cargo test --test differential
+#    See https://github.com/sid-ak/rusty_c_compiler/issues/33
+#
+#  fuzz:
+#    A long run of the lex, parse, and frontend targets on nightly, triggered by `on: schedule`
+#    rather than by a push, because it is measured in minutes per target rather than seconds:
+#      cargo +nightly fuzz run <target>
+#    See https://github.com/sid-ak/rusty_c_compiler/issues/37

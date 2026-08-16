@@ -9,15 +9,29 @@ correct.
 
 ## Status
 
-Design and planning are complete; implementation has not started. There is no `Cargo.toml` and no
-`src/` yet, so nothing builds or runs from a clean checkout. All five phases — lexer, parser,
-semantic analysis, code generation, differential testing — are open, tracked as
-[GitHub issues](https://github.com/sid-ak/rusty_c_compiler/issues) under one milestone each.
+The first pass of the front end works. `rustycc` builds and runs from a clean checkout, turns a C
+source file into a token stream, and reports what it cannot lex as a diagnostic with a caret under
+the offending text. It does not yet parse, analyze, or generate code, so it cannot produce an
+executable — `rustycc program.c -o program` accepts the arguments and runs the stages that exist.
 
-What exists is the documentation: the design and subset grammar in
-[`docs/architecture.md`](docs/architecture.md), the phased plan in [`docs/PLAN.md`](docs/PLAN.md),
-nine ADRs in [`docs/decisions/`](docs/decisions/index.md), and working conventions in
-[`AGENTS.md`](AGENTS.md).
+In the repo:
+
+- `src/diagnostics.rs` — spans over byte offsets, a source map that resolves one to a line and
+  column, the caret renderer every pass reports through, and a bag that collects diagnostics and
+  returns them in source order.
+- `src/lexer/` — the token set and keyword table, and a scanner over raw bytes that always
+  terminates, never panics, decodes literals once, and resynchronizes after a malformed construct so
+  a file with four mistakes reports four of them.
+- `runtime/shim.c` — `print_int`, `print_char`, and `print_string` on `write(2)`, compiled once by
+  the build script into the object both compilers will link in differential testing.
+- `.github/workflows/ci.yml` — fmt, clippy, and test on an Apple Silicon runner, behind a preflight
+  that checks the C toolchain resolves.
+
+Parser, semantic analysis, code generation, and the differential suite are open, tracked as
+[GitHub issues](https://github.com/sid-ak/rusty_c_compiler/issues) under one milestone per phase.
+The design and subset grammar are in [`docs/architecture.md`](docs/architecture.md), the phased plan
+in [`docs/PLAN.md`](docs/PLAN.md), nine ADRs in [`docs/decisions/`](docs/decisions/index.md), and
+the working conventions in [`AGENTS.md`](AGENTS.md).
 
 This section is refreshed every iteration, so it records where the project actually is.
 
@@ -53,11 +67,24 @@ The full grammar is in [`docs/architecture.md`](docs/architecture.md#the-languag
 
 ## Building
 
-Not yet applicable. Once Phase 1 lands the entry points are `cargo build` and `cargo test`, with the
-CLI contract `mycc program.c -o program`; full instructions are a Phase 5 deliverable
+1. `cargo build`: build `rustycc`. The build script compiles `runtime/shim.c` with `clang`, so the
+   Xcode Command Line Tools have to be installed first.
+2. `cargo test`: the whole suite — unit tests, the token-stream snapshot, and the runtime shim
+   compiled, linked, and run.
+3. `cargo fmt --check && cargo clippy --all-targets -- -D warnings`: the lint gates CI enforces.
+
+To see what the compiler makes of a file:
+
+1. `./target/debug/rustycc program.c --dump-tokens`: print each token with the source range it came
+   from.
+2. `./target/debug/rustycc broken.c --dump-tokens`: on a malformed file, print a diagnostic with the
+   offending line and a caret, and exit non-zero.
+
+The toolchain is pinned in `rust-toolchain.toml`, so `cargo` installs the right compiler on its own.
+Complete instructions for building and running every tier of tests are a Phase 5 deliverable
 ([#38](https://github.com/sid-ak/rusty_c_compiler/issues/38)).
 
-The documentation site builds today:
+The documentation site builds too:
 
 1. `uv venv && uv pip install -r requirements-docs.txt`: install MkDocs.
 2. `uv run mkdocs serve`: serve locally with live reload.

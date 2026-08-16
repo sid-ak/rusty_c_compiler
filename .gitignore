@@ -12,3 +12,6 @@
 
 # macOS
 .DS_Store
+
+# Generated: rustdoc staged into the docs site by scripts/build-docs.sh
+/docs/api/

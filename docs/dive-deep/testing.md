@@ -13,13 +13,13 @@ Each tier catches what the tier below it cannot:
 - Golden-program test: a `.c` file in `tests/programs/` with a recorded expected exit code and
   stdout. Used while the compiler is the only thing that can run the corpus, before code generation
   is far enough along to differentially test.
-- Differential test: the same `.c` file compiled by both `mycc` and `clang -O0`, both run, outputs and
+- Differential test: the same `.c` file compiled by both `rustycc` and `clang -O0`, both run, outputs and
   exit status compared. Replaces the recorded expectations of golden tests once an oracle is
   available.
 
 ## Differential testing against clang
 
-Every program in the corpus is built twice — once by `mycc`, once by `clang -O0 -std=c99 -Wall` —
+Every program in the corpus is built twice — once by `rustycc`, once by `clang -O0 -std=c99 -Wall` —
 with both linked against the same `shim.o`. Both binaries run with identical argv, empty stdin, and a
 wall-clock timeout. The harness compares stdout byte for byte, compares stderr, and compares exit
 status masked to the low 8 bits, distinguishing death by signal from normal exit. Each program is its
@@ -49,6 +49,6 @@ alone while the compiler itself builds on stable.
 ## Acceptance
 
 The system-level acceptance criterion is a single run: every program in the curated suite, covering
-every supported language feature, producing identical behavior under `mycc` and under `clang -O0`.
+every supported language feature, producing identical behavior under `rustycc` and under `clang -O0`.
 The project is functionally complete when that run is green with zero known mismatches, and not
 before.

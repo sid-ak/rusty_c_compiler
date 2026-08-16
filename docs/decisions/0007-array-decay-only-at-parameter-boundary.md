@@ -57,7 +57,7 @@ explicitly as an intentional deviation.
 Exclude arrays from function boundaries entirely. Keeps the promise about pointers literally, and
 makes arrays nearly useless. Rejected: it would gut the corpus.
 
-Pass arrays by value, copying them. Not C. Rejected: it would make `mycc` and `clang` disagree on
+Pass arrays by value, copying them. Not C. Rejected: it would make `rustycc` and `clang` disagree on
 any program that mutates an array argument, which is precisely the differential mismatch the project
 exists to detect.
 

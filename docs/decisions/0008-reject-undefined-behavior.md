@@ -10,7 +10,7 @@ integer overflow, division by zero, indexing outside an array, reading an uninit
 conforming compiler may do anything at all in those cases, and two conforming compilers may do
 different things.
 
-This project's correctness criterion is that `mycc` and `clang -O0` agree — see
+This project's correctness criterion is that `rustycc` and `clang -O0` agree — see
 [ADR 0001](0001-subset-of-c-with-clang-as-oracle.md). A program with undefined behavior breaks that
 criterion in both directions. If the two compilers disagree, that proves nothing, because both are
 free to do anything. If they agree, that also proves nothing, because agreement was never required.
@@ -42,7 +42,7 @@ The generated corpus can be validated independently: running it under
 `clang -O0 -fsanitize=undefined` must produce no reports. If it does, the generator's guards are
 wrong, and that is caught before any mismatch is blamed on the compiler.
 
-The cost is that `mycc` rejects some valid C. A program relying on falling off the end of a function
+The cost is that `rustycc` rejects some valid C. A program relying on falling off the end of a function
 compiles under `clang` and not here. This is recorded as an intentional deviation in the
 invalid-program corpus, where each rejected program either is also rejected by `clang` or carries a
 written reason for the divergence, so the stricter-than-C surface stays deliberate and small rather

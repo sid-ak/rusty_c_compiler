@@ -1,6 +1,7 @@
 site_name: Rusty C Compiler
 site_description: A compiler for a subset of C, written in Rust, targeting ARM64 macOS.
 site_author: Sidharth Anandkumar
+site_url: https://sid-ak.github.io/rusty_c_compiler/
 repo_url: https://github.com/sid-ak/rusty_c_compiler
 repo_name: sid-ak/rusty_c_compiler
 edit_uri: edit/main/docs/
@@ -17,9 +18,19 @@ plugins:
       glob:
         - dive-deep/*
 
+# docs/api/ is the rustdoc output staged by scripts/build-docs.sh — generated content, not authored
+# pages, so none of it belongs in the nav. Declaring that here rather than loosening
+# validation.omitted_files keeps the "a new page must be in the nav" rule strict for real pages.
+# It is a glob rather than one filename because rustdoc ships a markdown licence file with its
+# bundled font, and a future version may ship others.
+not_in_nav: |
+  api/**
+
 nav:
   - Home: index.md
   - Architecture: architecture.md
+  - Cheatsheet: CHEATSHEET.md
+  - API Reference: api.md
   - Pragmatic Testing: PRAGMATIC_TESTING.md
   - Implementation Plan: PLAN.md
   - Decisions:
