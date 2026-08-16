@@ -56,11 +56,24 @@ pub fn lex(source: &[u8]) -> Lexed {
 /// so they are shown re-escaped as `CharLit('\n')` and `StrLit("sum:\t")`, which is the same
 /// information in the form the reader wrote it.
 pub fn dump(map: &SourceMap, tokens: &[Token]) -> String {
-    let mut rendered = String::new();
+    // The position column is measured before anything is written, rather than given a fixed width.
+    // Positions grow with the file: a fixed column wide enough for `9:9-9:12` stops aligning the
+    // moment a program reaches four-digit line numbers, which is exactly when a dump is long enough
+    // that alignment is what makes it readable.
+    let positions: Vec<String> = tokens
+        .iter()
+        .map(|token| {
+            format!(
+                "{}-{}",
+                map.location(token.span.start),
+                map.location(token.span.end)
+            )
+        })
+        .collect();
+    let width = positions.iter().map(String::len).max().unwrap_or(0) + 2;
 
-    for token in tokens {
-        let start = map.location(token.span.start);
-        let end = map.location(token.span.end);
+    let mut rendered = String::new();
+    for (token, position) in tokens.iter().zip(&positions) {
         let kind = match &token.kind {
             kind @ TokenKind::CharLit(_) => format!("CharLit({kind})"),
             kind @ TokenKind::StrLit(_) => format!("StrLit({kind})"),
@@ -68,7 +81,7 @@ pub fn dump(map: &SourceMap, tokens: &[Token]) -> String {
         };
 
         // Writing to a String cannot fail, so there is no error path worth propagating.
-        let _ = writeln!(rendered, "{:<16}{kind}", format!("{start}-{end}"));
+        let _ = writeln!(rendered, "{position:<width$}{kind}");
     }
 
     rendered
@@ -730,18 +743,45 @@ mod tests {
         assert_eq!(
             dump(&map, &lexed.tokens),
             concat!(
-                "1:1-1:4         Keyword(Int)\n",
-                "1:5-1:6         Ident(\"x\")\n",
-                "1:6-1:7         Semi\n",
-                "2:1-2:3         Keyword(If)\n",
-                "2:4-2:5         LParen\n",
-                "2:5-2:6         Ident(\"x\")\n",
-                "2:6-2:7         RParen\n",
-                "3:2-3:8         Keyword(Return)\n",
-                "3:9-3:10        IntLit(0)\n",
-                "3:10-3:11       Semi\n",
-                "4:1-4:1         Eof\n",
+                "1:1-1:4    Keyword(Int)\n",
+                "1:5-1:6    Ident(\"x\")\n",
+                "1:6-1:7    Semi\n",
+                "2:1-2:3    Keyword(If)\n",
+                "2:4-2:5    LParen\n",
+                "2:5-2:6    Ident(\"x\")\n",
+                "2:6-2:7    RParen\n",
+                "3:2-3:8    Keyword(Return)\n",
+                "3:9-3:10   IntLit(0)\n",
+                "3:10-3:11  Semi\n",
+                "4:1-4:1    Eof\n",
             )
+        );
+    }
+
+    /// The position column widens with the file, so a dump of a long program still lines up.
+    ///
+    /// A fixed-width column stops aligning once line numbers outgrow it, and that is precisely the
+    /// size of file where a dump is long enough for alignment to be what makes it readable.
+    #[test]
+    fn dump_column_widens_for_large_line_numbers() {
+        let mut source = vec![b'\n'; 10_000];
+        source.extend_from_slice(b"int x;\n");
+        let lexed = lex(&source);
+        let map = SourceMap::new(Path::new("t.c"), &source);
+
+        let dumped = dump(&map, &lexed.tokens);
+
+        // The kind begins after the padding, so every line should start it at the same column.
+        let kind_starts: std::collections::HashSet<usize> = dumped
+            .lines()
+            .map(|line| line.rfind("  ").map(|index| index + 2).unwrap_or(0))
+            .collect();
+        assert_eq!(kind_starts.len(), 1, "columns not aligned:\n{dumped}");
+
+        let column = kind_starts.into_iter().next().unwrap_or(0);
+        assert!(
+            column > 16,
+            "expected five-digit lines to need more than the old fixed width, got {column}"
         );
     }
 

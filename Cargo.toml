@@ -2,7 +2,11 @@
 name = "rustycc"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
+# No rust-version. `rust-toolchain.toml` pins the exact toolchain, and that pin is the contract:
+# this is a single binary for one platform, not published, with no downstream consumer for an MSRV
+# to inform. A second, weaker statement of the supported version can only ever agree or disagree
+# with the pin, and nothing here would exercise the difference — the 1.82 that used to sit here was
+# already wrong, since clap requires 1.85.
 description = "A compiler for a subset of C, emitting ARM64 assembly for Apple Silicon macOS"
 repository = "https://github.com/sid-ak/rusty_c_compiler"
 publish = false
