@@ -1,6 +1,7 @@
 site_name: Rusty C Compiler
 site_description: A compiler for a subset of C, written in Rust, targeting ARM64 macOS.
 site_author: Sidharth Anandkumar
+site_url: https://sid-ak.github.io/rusty_c_compiler/
 repo_url: https://github.com/sid-ak/rusty_c_compiler
 repo_name: sid-ak/rusty_c_compiler
 edit_uri: edit/main/docs/
@@ -20,6 +21,8 @@ plugins:
 nav:
   - Home: index.md
   - Architecture: architecture.md
+  - Cheatsheet: CHEATSHEET.md
+  - API Reference: api.md
   - Pragmatic Testing: PRAGMATIC_TESTING.md
   - Implementation Plan: PLAN.md
   - Decisions:
