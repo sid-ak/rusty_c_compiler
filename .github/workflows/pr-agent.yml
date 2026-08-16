@@ -1,0 +1,36 @@
+name: PR Agent (Gemini)
+
+# Automated pull request review, description, and improvement suggestions.
+#
+# Note the triggers: a review runs when a PR is opened, reopened, or marked ready for review, and
+# when someone comments a command such as /review or /improve. `synchronize` is deliberately absent,
+# so pushing more commits to an open PR does not re-run the whole review and consume quota on every
+# push — comment /review to ask for another pass.
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+  issue_comment:
+
+jobs:
+  pr_agent_job:
+    if: ${{ github.event.sender.type != 'Bot' && !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: write
+      checks: write
+    name: Run PR Agent (Gemini free tier) on pull requests and comments
+    steps:
+      - name: PR Agent action step
+        uses: the-pr-agent/pr-agent@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Free-tier Gemini models via Google AI Studio — no OpenAI cost.
+          config.model: "gemini/gemini-2.5-flash"
+          config.fallback_models: '["gemini/gemini-2.5-flash-lite"]'
+          GOOGLE_AI_STUDIO.GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Auto-run on new/updated PRs.
+          github_action_config.auto_review: "true"
+          github_action_config.auto_describe: "true"
+          github_action_config.auto_improve: "true"
