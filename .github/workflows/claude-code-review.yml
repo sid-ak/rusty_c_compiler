@@ -38,8 +38,28 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          # The skill's step 1 stops when Claude has already commented on the pull request.
+          # That is written into the plugin's command file, not exposed as a flag, so it is
+          # overridden here in the prompt. The other preconditions it checks — closed, draft,
+          # nothing worth reviewing — are left alone, since only the repeat-comment rule was
+          # unwanted: a push to a reviewed branch should get a fresh review, not silence.
+          prompt: |
+            /code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
+
+            Override one precondition in step 1: review this pull request even when Claude has
+            already commented on it. Post the review regardless of any earlier Claude comment.
+            Keep every other precondition — still stop for a closed or draft pull request, or
+            one that genuinely needs no review.
           claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment"'
+          # Defaults to false. On means a review that decides to say nothing still leaves its
+          # reasoning in the run summary, instead of a green check that explains nothing.
+          #
+          # show_full_output is deliberately left off. It would add every message including
+          # tool results, and this repository is public, so that log is world-readable —
+          # GitHub masks the secret values it knows, and nothing else. The report alone gives
+          # the visibility; the full stream is a debugging tool worth turning on deliberately
+          # and briefly, not leaving on.
+          display_report: "true"
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
