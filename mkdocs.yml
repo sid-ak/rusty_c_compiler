@@ -18,6 +18,14 @@ plugins:
       glob:
         - dive-deep/*
 
+# docs/api/ is the rustdoc output staged by scripts/build-docs.sh — generated content, not authored
+# pages, so none of it belongs in the nav. Declaring that here rather than loosening
+# validation.omitted_files keeps the "a new page must be in the nav" rule strict for real pages.
+# It is a glob rather than one filename because rustdoc ships a markdown licence file with its
+# bundled font, and a future version may ship others.
+not_in_nav: |
+  api/**
+
 nav:
   - Home: index.md
   - Architecture: architecture.md
