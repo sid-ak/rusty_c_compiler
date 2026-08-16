@@ -63,6 +63,29 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test
 
+  docs:
+    name: docs
+    runs-on: macos-14
+    needs: toolchain
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+
+      # Runs the same script a contributor runs, so what CI checks and what can be reproduced
+      # locally cannot drift. It fails on a broken internal link, a page missing from the nav, and
+      # on a rustdoc link pointing at an item that no longer exists — the last of which
+      # `#![deny(missing_docs)]` cannot catch, since the doc comment is present, only stale.
+      - name: Build the prose site and the API reference
+        run: ./scripts/build-docs.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: site/
+          retention-days: 7
+
 # Phase 5 adds two more jobs here, wired up by issue #38. They are named now so the shape of the
 # finished pipeline is visible, and so neither is quietly forgotten.
 #

@@ -1,0 +1,54 @@
+name: Deploy docs
+
+# Publishes the prose site with the API reference stitched in under /api/, from main only.
+#
+# This is a separate workflow from ci.yml on purpose. Deployment depends on repository settings that
+# a workflow file cannot assert — GitHub Pages has to be set to build from GitHub Actions — so a
+# failure here means "Pages is not configured", which should not turn the fmt, clippy, and test run
+# red on a change that has nothing to do with documentation. ci.yml builds the same site on every
+# push and would catch a genuine docs break long before this workflow runs.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# The token is scoped to what deploying needs and nothing more.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and never cancel one part way: a half-published site is worse than an
+# out-of-date one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build the site
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Build the prose site and the API reference
+        run: ./scripts/build-docs.sh
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+  deploy:
+    name: Deploy to Pages
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
