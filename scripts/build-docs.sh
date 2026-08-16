@@ -63,7 +63,15 @@ cp -R target/doc docs/api
 echo "==> building the prose site"
 # --strict catches a broken internal link or a page missing from the nav. Because the API reference
 # is staged above, docs/api.md's link to it is checked here too rather than being taken on trust.
-uv run mkdocs build --strict
+#
+# --with-requirements resolves the pinned docs dependencies itself, so this works on a clean
+# checkout with no virtualenv — a plain `uv run mkdocs` finds nothing to spawn there, which is how
+# it failed in CI while passing locally off a venv that happened to exist. Naming the requirements
+# file rather than installing mkdocs in the workflow keeps the theme and plugin versions in one
+# place: mkdocs.yml uses the material theme and the exclude plugin, so mkdocs alone is not enough.
+# It is also non-destructive, layering onto whatever environment is active instead of creating or
+# overwriting a .venv the user manages.
+uv run --with-requirements requirements-docs.txt mkdocs build --strict
 
 test -f site/index.html || {
     echo "error: the prose site did not build" >&2
