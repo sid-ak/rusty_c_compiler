@@ -86,7 +86,7 @@ pass.
    the change is intended. Never accept a snapshot you have not read.
 5. `cargo +nightly fuzz run lex`: one fuzz target; also `parse` and `frontend`. Run at least 15
    minutes per target before calling a front-end phase done.
-6. `MYCC_KEEP_TEMPS=1 cargo test --test differential`: retain the generated `.s` for a failing
+6. `RUSTYCC_KEEP_TEMPS=1 cargo test --test differential`: retain the generated `.s` for a failing
    program so it can be inspected.
 
 A failing differential test is a compiler bug until proven otherwise. Do not adjust the expectation

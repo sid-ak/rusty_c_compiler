@@ -179,7 +179,7 @@ dive-deeper below.
 ## The driver
 
 Everything above turns a `.c` file into assembly text — but assembly text is not a runnable program
-yet. The driver is what closes that gap: it is the part that makes `mycc program.c -o program` behave
+yet. The driver is what closes that gap: it is the part that makes `rustycc program.c -o program` behave
 like an ordinary compiler rather than a tool that prints assembly and stops.
 
 Concretely, it hands the generated assembly to `clang` to turn into an object file, hands that object

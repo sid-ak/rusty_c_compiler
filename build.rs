@@ -18,7 +18,7 @@ use std::process::Command;
 /// Where the shim's source lives, relative to the crate root.
 const SHIM_SOURCE: &str = "runtime/shim.c";
 
-/// Compile `runtime/shim.c` into `$OUT_DIR/shim.o` and export its path as `MYCC_SHIM_OBJECT`.
+/// Compile `runtime/shim.c` into `$OUT_DIR/shim.o` and export its path as `RUSTYCC_SHIM_OBJECT`.
 fn main() {
     println!("cargo::rerun-if-changed={SHIM_SOURCE}");
     println!("cargo::rerun-if-changed=build.rs");
@@ -45,5 +45,5 @@ fn main() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    println!("cargo::rustc-env=MYCC_SHIM_OBJECT={}", object.display());
+    println!("cargo::rustc-env=RUSTYCC_SHIM_OBJECT={}", object.display());
 }

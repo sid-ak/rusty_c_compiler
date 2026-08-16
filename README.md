@@ -9,10 +9,10 @@ correct.
 
 ## Status
 
-The first pass of the front end works. `mycc` builds and runs from a clean checkout, turns a C
+The first pass of the front end works. `rustycc` builds and runs from a clean checkout, turns a C
 source file into a token stream, and reports what it cannot lex as a diagnostic with a caret under
 the offending text. It does not yet parse, analyze, or generate code, so it cannot produce an
-executable — `mycc program.c -o program` accepts the arguments and runs the stages that exist.
+executable — `rustycc program.c -o program` accepts the arguments and runs the stages that exist.
 
 In the repo:
 
@@ -67,7 +67,7 @@ The full grammar is in [`docs/architecture.md`](docs/architecture.md#the-languag
 
 ## Building
 
-1. `cargo build`: build `mycc`. The build script compiles `runtime/shim.c` with `clang`, so the
+1. `cargo build`: build `rustycc`. The build script compiles `runtime/shim.c` with `clang`, so the
    Xcode Command Line Tools have to be installed first.
 2. `cargo test`: the whole suite — unit tests, the token-stream snapshot, and the runtime shim
    compiled, linked, and run.
@@ -75,9 +75,9 @@ The full grammar is in [`docs/architecture.md`](docs/architecture.md#the-languag
 
 To see what the compiler makes of a file:
 
-1. `./target/debug/mycc program.c --dump-tokens`: print each token with the source range it came
+1. `./target/debug/rustycc program.c --dump-tokens`: print each token with the source range it came
    from.
-2. `./target/debug/mycc broken.c --dump-tokens`: on a malformed file, print a diagnostic with the
+2. `./target/debug/rustycc broken.c --dump-tokens`: on a malformed file, print a diagnostic with the
    offending line and a caret, and exit non-zero.
 
 The toolchain is pinned in `rust-toolchain.toml`, so `cargo` installs the right compiler on its own.

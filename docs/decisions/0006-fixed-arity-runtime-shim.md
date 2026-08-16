@@ -31,7 +31,7 @@ void print_string(char *s);
 ```
 
 They are built on `write(2)` with no `stdio` dependency. `print_string` is a loop over `print_char`
-to the null terminator. Both `mycc` and `clang` link the same object when building the same test
+to the null terminator. Both `rustycc` and `clang` link the same object when building the same test
 program.
 
 ## Consequences
@@ -59,7 +59,7 @@ there is no format-string behavior to get wrong on either side.
 Declare and call `printf` directly. Rejected on variadic AAPCS64 complexity and on buffering
 non-determinism.
 
-Implement the shim in the subset itself, compiled by `mycc`. Appealing, and it would remove the C
+Implement the shim in the subset itself, compiled by `rustycc`. Appealing, and it would remove the C
 dependency. Rejected because it needs a syscall mechanism the subset has no way to express, and
 because a runtime compiled by the compiler under test cannot serve as neutral ground for comparing
 that compiler against another.

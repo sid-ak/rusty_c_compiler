@@ -10,7 +10,7 @@ use std::path::Path;
 ///
 /// One object per build, linked by the driver and by both test harnesses, so every binary in a
 /// differential comparison contains the identical runtime.
-pub const SHIM_OBJECT: &str = env!("MYCC_SHIM_OBJECT");
+pub const SHIM_OBJECT: &str = env!("RUSTYCC_SHIM_OBJECT");
 
 /// The path to [`SHIM_OBJECT`].
 pub fn shim_object() -> &'static Path {

@@ -5,8 +5,8 @@
 
 use std::path::Path;
 
-use mycc::diagnostics::SourceMap;
-use mycc::lexer;
+use rustycc::diagnostics::SourceMap;
+use rustycc::lexer;
 
 /// A program touching every lexable construct in the subset: both comment forms, all three integer
 /// bases, character and string literals with escapes, every operator, and every punctuator.

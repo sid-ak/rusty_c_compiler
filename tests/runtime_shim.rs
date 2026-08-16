@@ -13,7 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use mycc::runtime::SHIM_OBJECT;
+use rustycc::runtime::SHIM_OBJECT;
 
 /// The shim's declarations, as a program under test must declare them for itself — there is no
 /// header, because the compiled subset has no preprocessor to include one with.

@@ -24,9 +24,9 @@ pub enum Stage {
     Executable,
 }
 
-/// Everything a single `mycc` invocation was asked to do.
+/// Everything a single `rustycc` invocation was asked to do.
 #[derive(Debug, Clone, Parser)]
-#[command(name = "mycc", version, about, long_about = None)]
+#[command(name = "rustycc", version, about, long_about = None)]
 pub struct Options {
     /// The C source file to compile.
     #[arg(value_name = "FILE")]
@@ -96,7 +96,7 @@ mod tests {
 
     /// Parse `args` as a full command line, including the program name.
     fn parse(args: &[&str]) -> Options {
-        let mut argv = vec!["mycc"];
+        let mut argv = vec!["rustycc"];
         argv.extend_from_slice(args);
         Options::try_parse_from(argv).expect("expected these arguments to parse")
     }
@@ -108,7 +108,7 @@ mod tests {
         Options::command().debug_assert();
     }
 
-    /// The documented contract `mycc program.c -o program` parses into input and output paths.
+    /// The documented contract `rustycc program.c -o program` parses into input and output paths.
     #[test]
     fn parses_the_documented_invocation() {
         let options = parse(&["program.c", "-o", "program"]);
@@ -142,7 +142,7 @@ mod tests {
     /// The debug flags are mutually exclusive; asking to stop in two places is a usage error.
     #[test]
     fn debug_flags_conflict_with_each_other() {
-        let result = Options::try_parse_from(["mycc", "program.c", "--dump-tokens", "--check"]);
+        let result = Options::try_parse_from(["rustycc", "program.c", "--dump-tokens", "--check"]);
 
         assert!(
             result.is_err(),
@@ -150,10 +150,10 @@ mod tests {
         );
     }
 
-    /// An input file is required, so a bare `mycc` is a usage error rather than a silent no-op.
+    /// An input file is required, so a bare `rustycc` is a usage error rather than a silent no-op.
     #[test]
     fn input_file_is_required() {
-        assert!(Options::try_parse_from(["mycc"]).is_err());
+        assert!(Options::try_parse_from(["rustycc"]).is_err());
     }
 
     /// `--keep-temps` is off unless asked for.

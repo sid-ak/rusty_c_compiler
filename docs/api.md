@@ -3,7 +3,7 @@
 The compiler's own doc comments, rendered by `rustdoc`: every module, type, and function in `src/`,
 with the reasoning that sits next to the code rather than in a design document.
 
-[Browse the API reference](api/mycc/index.html)
+[Browse the API reference](api/rustycc/index.html)
 
 This is the counterpart to [Architecture](architecture.md), not a replacement for it. The
 architecture document explains what the compiler does and why it is shaped that way, at the level of

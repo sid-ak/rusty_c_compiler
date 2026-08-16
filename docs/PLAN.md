@@ -38,7 +38,7 @@ project depends on.
 
 ### Deliverables
 
-1. Cargo project `mycc` with a `lib.rs` + thin `main.rs` split, so integration tests can call the
+1. Cargo project `rustycc` with a `lib.rs` + thin `main.rs` split, so integration tests can call the
    compiler as a library rather than shelling out.
 2. `src/diagnostics.rs`:
     - `Span { start: usize, end: usize }` over byte offsets into the source.
@@ -110,7 +110,7 @@ apply directly to this phase.
 
 - `cargo test` green; a fixture file of every lexable construct round-trips to the expected token
   stream with correct spans.
-- `mycc --dump-tokens program.c` prints a token stream for a hand-written sample and prints a
+- `rustycc --dump-tokens program.c` prints a token stream for a hand-written sample and prints a
   rendered diagnostic with a caret for a deliberately broken sample.
 - CI green on `macos-14`.
 
@@ -136,7 +136,7 @@ graceful, recovering error reporting.
    the current brace depth, then continue. One bad statement yields one error, not a cascade, and
    never an infinite loop — every recovery step is proven to consume at least one token.
 5. A deterministic AST pretty-printer (an S-expression dump) used for snapshot tests and exposed as
-   `mycc --dump-ast`.
+   `rustycc --dump-ast`.
 6. Targeted diagnostics for the constructs listed as out of scope in
    [architecture.md](architecture.md#out-of-scope): seeing `struct`, `switch`, `#include`,
    `*`-as-declarator, `?:`, or `+=` produces "unsupported in this C subset: X" rather than a generic
@@ -181,7 +181,7 @@ apply directly to this phase.
 
 ### Exit criteria
 
-- `mycc --dump-ast` produces a correct dump for every program in `tests/programs/`.
+- `rustycc --dump-ast` produces a correct dump for every program in `tests/programs/`.
 - Every grammar production has at least one positive test and, where it can fail, one negative test.
 - Truncation corpus parses without a single panic.
 
@@ -271,7 +271,7 @@ apply directly to this phase.
 ### Exit criteria
 
 - Every check listed above has a passing positive and negative test.
-- `mycc --check program.c` exits 0 for every valid program in `tests/programs/` and non-zero with an
+- `rustycc --check program.c` exits 0 for every valid program in `tests/programs/` and non-zero with an
   accurate message for every file in `tests/programs/invalid/`.
 - Cross-check on the invalid corpus: for each rejected program, `clang -O0 -std=c99` also rejects it,
   or the deviation is explicitly recorded as one of the intentional restrictions in an
@@ -317,7 +317,7 @@ Goal: annotated AST to a native macOS executable, using the stack-spill strategy
    `clang` to link — including `runtime/shim.c`'s object — and clean up intermediates. Flags:
    `-o <out>`, `-S` to stop after assembly, `--emit-asm-to <path>`, `-c`, and `--keep-temps`.
    Toolchain invocation failures surface the child process's stderr rather than a bare exit code.
-8. `mycc program.c -o program` works end to end, matching the proposal's CLI contract.
+8. `rustycc program.c -o program` works end to end, matching the proposal's CLI contract.
 
 ### Tests
 
@@ -327,7 +327,7 @@ Goal: annotated AST to a native macOS executable, using the stack-spill strategy
 - Assemble-cleanly tests: every emitted `.s` in the snapshot set is fed to `clang -c` and must
   assemble with no warnings — this catches malformed directives that a snapshot alone would not.
 - Execution tests, the main body of the phase: each golden program in `tests/programs/` is compiled
-  by `mycc`, run, and checked against a recorded exit code and stdout. Coverage must include:
+  by `rustycc`, run, and checked against a recorded exit code and stdout. Coverage must include:
   - Arithmetic: precedence, integer division and remainder sign behavior, unary minus, large
     constants near `i32::MIN`/`i32::MAX`.
   - Operand order: every non-commutative operator exercised with asymmetric operands — `10 - 3` is
@@ -375,7 +375,7 @@ apply directly to this phase.
 
 - Every golden program compiles, links, runs, and matches its recorded exit code and stdout.
 - The emitted assembly for every golden program assembles under `clang -c` without warnings.
-- `mycc hello.c -o hello && ./hello` demonstrably works from a clean checkout.
+- `rustycc hello.c -o hello && ./hello` demonstrably works from a clean checkout.
 
 ## Phase 5 — Differential testing, fuzzing, and system acceptance
 
@@ -387,7 +387,7 @@ input, and satisfy the proposal's system-level acceptance criterion.
 1. `tests/differential.rs` — the harness described in
    [architecture.md](architecture.md#differential-testing-against-clang):
     - Discovers every `.c` file under `tests/programs/`.
-    - Builds each one twice: once via `mycc`, once via `clang -O0 -std=c99 -Wall`, both linked against
+    - Builds each one twice: once via `rustycc`, once via `clang -O0 -std=c99 -Wall`, both linked against
       the same `runtime/shim.o`.
     - Runs both binaries with identical argv, empty stdin, and a wall-clock timeout.
     - Compares stdout byte for byte, compares stderr, and compares exit status (masked to the low 8
@@ -428,7 +428,7 @@ input, and satisfy the proposal's system-level acceptance criterion.
 The harness is itself test code, so it needs its own verification:
 
 - Harness self-tests: a deliberately wrong compiler output must make the harness fail — inject a
-  program where `mycc` output is stubbed as wrong and assert the harness reports a mismatch. A
+  program where `rustycc` output is stubbed as wrong and assert the harness reports a mismatch. A
   harness that cannot fail proves nothing.
 - Timeout path: a program with an intentional infinite loop is killed and reported as a timeout, not
   a hang.

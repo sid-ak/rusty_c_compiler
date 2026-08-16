@@ -11,7 +11,7 @@ what it will eventually do — the same discipline the README's status section f
 
 1. `source ~/.cargo/env`: only needed in a shell opened before rustup was installed; new shells get
    it from `~/.zshrc`.
-2. `cargo build`: builds `mycc` into `target/debug/`. Also compiles `runtime/shim.c` with clang, so
+2. `cargo build`: builds `rustycc` into `target/debug/`. Also compiles `runtime/shim.c` with clang, so
    this is the first thing that fails if the Xcode Command Line Tools are missing.
 
 ## The gate
@@ -48,7 +48,7 @@ int main(void) {
     return total % 7;
 }
 EOF
-./target/debug/mycc /tmp/hello.c --dump-tokens
+./target/debug/rustycc /tmp/hello.c --dump-tokens
 ```
 
 Exit 0, and:
@@ -87,7 +87,7 @@ a start and end position.
 
 ```bash
 printf 'int f(void){int a=1;int b=2;return a+++b;}\n' > /tmp/munch.c
-./target/debug/mycc /tmp/munch.c --dump-tokens | grep Plus
+./target/debug/rustycc /tmp/munch.c --dump-tokens | grep Plus
 ```
 
 ```
@@ -102,7 +102,7 @@ also produces three tokens, so this needs looking at rather than counting.
 
 ```bash
 printf 'int main(void){\n\t\tint x = @;\n}\n' > /tmp/tabs.c
-./target/debug/mycc /tmp/tabs.c --dump-tokens
+./target/debug/rustycc /tmp/tabs.c --dump-tokens
 ```
 
 ```
@@ -126,7 +126,7 @@ char c = '';
 int b = @;
 int d = "open;
 EOF
-./target/debug/mycc /tmp/errors.c --dump-tokens
+./target/debug/rustycc /tmp/errors.c --dump-tokens
 ```
 
 Exit 1, and:
@@ -144,7 +144,7 @@ int b = @;
 /tmp/errors.c:4:9: error: unterminated string literal
 int d = "open;
         ^~~~~~
-mycc: 4 errors generated
+rustycc: 4 errors generated
 ```
 
 The check that matters most: four mistakes, four diagnostics, source order, and the lexer kept going
@@ -155,7 +155,7 @@ the `0`.
 
 ```bash
 printf 'int a = 4294967296;\n' > /tmp/big.c
-./target/debug/mycc /tmp/big.c --dump-tokens
+./target/debug/rustycc /tmp/big.c --dump-tokens
 ```
 
 ```
@@ -172,7 +172,7 @@ note: the maximum is 2147483647; write INT_MIN as -2147483647 - 1
 
 ```bash
 printf 'int a = 1 & 2;\n' > /tmp/amp.c
-./target/debug/mycc /tmp/amp.c --dump-tokens
+./target/debug/rustycc /tmp/amp.c --dump-tokens
 ```
 
 ```
@@ -186,17 +186,17 @@ A lone `&` is real C, so it is reported as unsupported rather than as a stray by
 
 ### 7. Bad invocations
 
-1. `./target/debug/mycc`: usage on stderr, exit 2.
-2. `./target/debug/mycc nope.c`: `mycc: cannot read 'nope.c': No such file or directory (os error 2)`,
+1. `./target/debug/rustycc`: usage on stderr, exit 2.
+2. `./target/debug/rustycc nope.c`: `rustycc: cannot read 'nope.c': No such file or directory (os error 2)`,
    exit 1.
-3. `./target/debug/mycc /tmp/hello.c --dump-tokens --check`: clap reports the conflict, exit 2. The
+3. `./target/debug/rustycc /tmp/hello.c --dump-tokens --check`: clap reports the conflict, exit 2. The
    stage flags are one conflict group, so a run stops in exactly one place.
 
 ### 8. Arbitrary bytes
 
 ```bash
 head -c 4096 /dev/urandom > /tmp/garbage.c
-./target/debug/mycc /tmp/garbage.c --dump-tokens
+./target/debug/rustycc /tmp/garbage.c --dump-tokens
 ```
 
 Must produce diagnostics and terminate — never a panic, never a hang. This is the invariant phase 5
@@ -269,5 +269,5 @@ unsigned arithmetic. A naive implementation prints something wrong here rather t
 | `-o <FILE>` | — | parsed and carried; nothing links yet |
 | `--keep-temps` | — | parsed; the driver that makes temp files is phase 4 |
 
-`mycc program.c -o program` parses its arguments and exits 0 without producing an executable. The
+`rustycc program.c -o program` parses its arguments and exits 0 without producing an executable. The
 shape of the CLI is fixed; later phases fill it in.

@@ -6,7 +6,7 @@
  * printf is buffered, so two binaries could flush at different points and produce a difference that
  * has nothing to do with either compiler.
  *
- * This file is ordinary C compiled by clang, not by mycc, so it may use the preprocessor and the
+ * This file is ordinary C compiled by clang, not by rustycc, so it may use the preprocessor and the
  * system headers that the compiled subset deliberately excludes. It is built once and the same
  * object is linked into both sides of every differential comparison, so there is no second runtime
  * implementation that could itself be wrong.

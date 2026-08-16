@@ -50,6 +50,12 @@ echo "==> building the API reference"
 # --document-private-items includes the scanner internals. They are the most intricate code in the
 # repo and the part a reader most needs the comments for, and hiding them would document only the
 # public surface of a compiler that is almost entirely private.
+#
+# target/doc is cleared first because rustdoc adds pages without ever removing them: a renamed or
+# deleted module leaves its old page behind, and the stage below would copy that stale page into
+# the published site. Rebuilding from empty costs a few seconds and makes the output describe only
+# what the crate currently contains.
+rm -rf target/doc
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items
 
 echo "==> staging it into docs/api"
@@ -58,7 +64,7 @@ cp -R target/doc docs/api
 
 # docs/api.md renders to /api/ and so replaces rustdoc's own landing page, which is no loss: that
 # page only lists crates, while docs/api.md explains what the reference is and links into the crate
-# at /api/mycc/. Nothing here should write docs/api/index.html — MkDocs would overwrite it.
+# at /api/rustycc/. Nothing here should write docs/api/index.html — MkDocs would overwrite it.
 
 echo "==> building the prose site"
 # --strict catches a broken internal link or a page missing from the nav. Because the API reference
@@ -77,7 +83,7 @@ test -f site/index.html || {
     echo "error: the prose site did not build" >&2
     exit 1
 }
-test -f site/api/mycc/index.html || {
+test -f site/api/rustycc/index.html || {
     echo "error: the API reference did not reach site/api" >&2
     exit 1
 }
