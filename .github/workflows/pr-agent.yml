@@ -27,8 +27,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Free-tier Gemini models via Google AI Studio — no OpenAI cost.
-          config.model: "gemini/gemini-2.5-flash"
-          config.fallback_models: '["gemini/gemini-2.5-flash-lite"]'
+          #
+          # Both names have to satisfy two independent constraints: Google must still serve the
+          # model to new API keys, and pr-agent must have a token limit registered for it in
+          # MAX_TOKENS, or it fails before it ever calls the API. gemini-2.5-flash fails the
+          # first (404, "no longer available to new users") and 2.5-flash-lite the second.
+          config.model: "gemini/gemini-3.7-flash"
+          config.fallback_models: '["gemini/gemini-3.5-flash-lite"]'
           GOOGLE_AI_STUDIO.GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # Auto-run on new/updated PRs.
           github_action_config.auto_review: "true"
