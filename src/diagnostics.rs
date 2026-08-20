@@ -104,6 +104,28 @@ impl Diagnostic {
         Self::new(DiagnosticKind::Lex, span, message)
     }
 
+    /// A parser diagnostic at `span`.
+    pub fn parse(span: Span, message: impl Into<String>) -> Self {
+        Self::new(DiagnosticKind::Parse, span, message)
+    }
+
+    /// A diagnostic for real C that this subset deliberately does not implement.
+    ///
+    /// One phrasing wherever such a construct turns up, because which pass notices it is an
+    /// accident of spelling rather than something the reader should have to know: the lexer
+    /// catches the ones that are punctuation, since `?` and `#` are not tokens of this grammar at
+    /// all, and the parser catches the ones that are words or shapes.
+    ///
+    /// `construct` names what was written — a quoted spelling such as `'struct'` for something the
+    /// user typed verbatim, or a phrase such as `pointer declarators` for a shape.
+    pub fn unsupported(kind: DiagnosticKind, span: Span, construct: impl fmt::Display) -> Self {
+        Self::new(
+            kind,
+            span,
+            format!("unsupported in this C subset: {construct}"),
+        )
+    }
+
     /// This diagnostic with `note` appended, for chaining at the construction site.
     pub fn with_note(mut self, note: impl Into<String>) -> Self {
         self.notes.push(note.into());
@@ -364,6 +386,22 @@ mod tests {
         assert_eq!(diagnostic.message, "stray character");
         assert_eq!(diagnostic.span, Span::new(0, 1));
         assert_eq!(diagnostic.notes, ["delete it", "or quote it"]);
+    }
+
+    /// Every pass phrases an out-of-subset construct identically, whichever pass noticed it.
+    #[test]
+    fn unsupported_reads_the_same_from_either_pass() {
+        let from_lexer = Diagnostic::unsupported(DiagnosticKind::Lex, Span::new(0, 1), "'&'");
+        let from_parser =
+            Diagnostic::unsupported(DiagnosticKind::Parse, Span::new(0, 6), "'struct'");
+
+        assert_eq!(from_lexer.message, "unsupported in this C subset: '&'");
+        assert_eq!(
+            from_parser.message,
+            "unsupported in this C subset: 'struct'"
+        );
+        assert_eq!(from_lexer.kind, DiagnosticKind::Lex);
+        assert_eq!(from_parser.kind, DiagnosticKind::Parse);
     }
 
     /// A three-line fixture with no trailing newline, used for the position tests below.

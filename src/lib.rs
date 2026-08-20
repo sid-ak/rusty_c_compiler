@@ -15,6 +15,7 @@ pub mod ast;
 pub mod cli;
 pub mod diagnostics;
 pub mod lexer;
+pub mod parser;
 pub mod runtime;
 
 use std::fmt;
@@ -100,6 +101,17 @@ pub fn compile(
 
         return Ok(Artifacts {
             dump: Some(lexer::dump(&source_map, &lexed.tokens)),
+        });
+    }
+
+    let parsed = parser::parse(&lexed.tokens);
+    if !parsed.diagnostics.is_empty() {
+        return Err(parsed.diagnostics);
+    }
+
+    if options.stage() == Stage::Ast {
+        return Ok(Artifacts {
+            dump: Some(ast::dump(&parsed.program, ast::Spans::Hidden)),
         });
     }
 
