@@ -1,0 +1,267 @@
+---
+source: tests/parser_snapshots.rs
+expression: "dump(&Path::new(CORPUS).join(\"arithmetic.c\"))"
+---
+(program
+  (func-decl void print_int
+    (params
+      (param int n)))
+  (func-decl void print_char
+    (params
+      (param char c)))
+  (func-def int main
+    (params)
+    (block
+      (local-var int a
+        (init
+          (int-lit 17)))
+      (local-var int b
+        (init
+          (int-lit 5)))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary +
+              (ident a)
+              (ident b)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary -
+              (ident a)
+              (ident b)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary *
+              (ident a)
+              (ident b)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary /
+              (ident a)
+              (ident b)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary %
+              (ident a)
+              (ident b)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (unary -
+              (ident a)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (unary +
+              (ident b)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (unary !
+              (ident b)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (unary !
+              (int-lit 0)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary +
+              (int-lit 1)
+              (binary *
+                (int-lit 2)
+                (int-lit 3))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary *
+              (binary +
+                (int-lit 1)
+                (int-lit 2))
+              (int-lit 3)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary ==
+              (binary <
+                (int-lit 1)
+                (int-lit 2))
+              (binary <
+                (int-lit 3)
+                (int-lit 4))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary &&
+              (binary >
+                (ident a)
+                (ident b))
+              (binary >
+                (ident b)
+                (int-lit 0))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary ||
+              (binary <
+                (ident a)
+                (ident b))
+              (binary <
+                (ident b)
+                (ident a))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary ||
+              (binary >
+                (ident a)
+                (ident b))
+              (binary &&
+                (binary >
+                  (ident a)
+                  (ident b))
+                (binary <
+                  (ident a)
+                  (ident b)))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary -
+              (binary -
+                (int-lit 100)
+                (int-lit 10))
+              (int-lit 1)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary /
+              (binary /
+                (int-lit 100)
+                (int-lit 10))
+              (int-lit 2)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary %
+              (binary %
+                (int-lit 100)
+                (int-lit 30))
+              (int-lit 4)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary &&
+              (binary -
+                (ident b)
+                (int-lit 5))
+              (binary /
+                (ident a)
+                (binary -
+                  (ident b)
+                  (int-lit 5)))))))
+      (local-var int n
+        (init
+          (int-lit 0)))
+      (expr-stmt
+        (assign
+          (ident n)
+          (binary +
+            (ident n)
+            (int-lit 1))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (postfix ++
+              (ident n)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (ident n))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (unary ++
+              (ident n)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (postfix --
+              (ident n)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (unary --
+              (ident n)))))
+      (local-var int x
+        (init
+          (int-lit 0)))
+      (local-var int y
+        (init
+          (int-lit 0)))
+      (expr-stmt
+        (assign
+          (ident x)
+          (assign
+            (ident y)
+            (int-lit 9))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (ident x))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (ident y))))
+      (local-var char c
+        (init
+          (char-lit 'A')))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (ident c))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary +
+              (ident c)
+              (int-lit 2)))))
+      (expr-stmt
+        (call
+          (ident print_char)
+          (args
+            (char-lit '\n'))))
+      (return
+        (int-lit 0)))))
