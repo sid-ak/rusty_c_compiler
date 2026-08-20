@@ -11,6 +11,7 @@
 
 #![deny(missing_docs)]
 
+pub mod ast;
 pub mod cli;
 pub mod diagnostics;
 pub mod lexer;
