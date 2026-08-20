@@ -9,10 +9,14 @@ correct.
 
 ## Status
 
-The first pass of the front end works. `rustycc` builds and runs from a clean checkout, turns a C
-source file into a token stream, and reports what it cannot lex as a diagnostic with a caret under
-the offending text. It does not yet parse, analyze, or generate code, so it cannot produce an
-executable — `rustycc program.c -o program` accepts the arguments and runs the stages that exist.
+The front end reads. `rustycc` builds and runs from a clean checkout, turns a C source file into a
+syntax tree covering the whole subset grammar, and prints it with `rustycc program.c --dump-ast`. A
+program it cannot read comes back as diagnostics with a caret under the offending text — one per
+mistake, in source order, and a construct that is real C this subset simply does not implement is
+told apart from one that is malformed.
+
+It does not yet check what a program means or generate code, so it cannot produce an executable:
+`rustycc program.c -o program` accepts its arguments and runs the stages that exist.
 
 In the repo:
 
@@ -22,16 +26,25 @@ In the repo:
 - `src/lexer/` — the token set and keyword table, and a scanner over raw bytes that always
   terminates, never panics, decodes literals once, and resynchronizes after a malformed construct so
   a file with four mistakes reports four of them.
+- `src/ast.rs` — the node types the parser builds and the two later passes read, each carrying a
+  span and an identity, with no field for anything a later pass works out; plus the deterministic
+  S-expression dump that parser tests assert against.
+- `src/parser/` — recursive descent over declarations and statements, precedence climbing over
+  expressions, panic-mode recovery that provably consumes a token per step, and a nesting limit that
+  turns a hostile input into a diagnostic rather than a stack overflow.
+- `tests/programs/` — five subset-C programs, one per feature area, with a coverage matrix that CI
+  holds them to. They are the parser's snapshots now and the differential corpus later.
 - `runtime/shim.c` — `print_int`, `print_char`, and `print_string` on `write(2)`, compiled once by
   the build script into the object both compilers will link in differential testing.
 - `.github/workflows/ci.yml` — fmt, clippy, and test on an Apple Silicon runner, behind a preflight
   that checks the C toolchain resolves.
 
-Parser, semantic analysis, code generation, and the differential suite are open, tracked as
+Semantic analysis, code generation, and the differential suite are open, tracked as
 [GitHub issues](https://github.com/sid-ak/rusty_c_compiler/issues) under one milestone per phase.
 The design and subset grammar are in [`docs/architecture.md`](docs/architecture.md), the phased plan
-in [`docs/PLAN.md`](docs/PLAN.md), nine ADRs in [`docs/decisions/`](docs/decisions/index.md), and
-the working conventions in [`AGENTS.md`](AGENTS.md).
+in [`docs/PLAN.md`](docs/PLAN.md), nine ADRs in [`docs/decisions/`](docs/decisions/index.md), the
+commands for driving it by hand in [`docs/CHEATSHEET.md`](docs/CHEATSHEET.md), and the working
+conventions in [`AGENTS.md`](AGENTS.md).
 
 This section is refreshed every iteration, so it records where the project actually is.
 
