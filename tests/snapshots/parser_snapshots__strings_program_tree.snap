@@ -1,0 +1,214 @@
+---
+source: tests/parser_snapshots.rs
+expression: "dump(&Path::new(CORPUS).join(\"strings.c\"))"
+---
+(program
+  (func-decl void print_int
+    (params
+      (param int n)))
+  (func-decl void print_char
+    (params
+      (param char c)))
+  (func-decl void print_string
+    (params
+      (param char[] s)))
+  (func-def int length
+    (params
+      (param char[] s))
+    (block
+      (local-var int n
+        (init
+          (int-lit 0)))
+      (while
+        (binary !=
+          (index
+            (ident s)
+            (ident n))
+          (int-lit 0))
+        (block
+          (expr-stmt
+            (assign
+              (ident n)
+              (binary +
+                (ident n)
+                (int-lit 1))))))
+      (return
+        (ident n))))
+  (func-def int main
+    (params)
+    (block
+      (expr-stmt
+        (call
+          (ident print_string)
+          (args
+            (str-lit "hello, world"))))
+      (expr-stmt
+        (call
+          (ident print_char)
+          (args
+            (char-lit '\n'))))
+      (expr-stmt
+        (call
+          (ident print_string)
+          (args
+            (str-lit ""))))
+      (expr-stmt
+        (call
+          (ident print_string)
+          (args
+            (str-lit "tab:\there"))))
+      (expr-stmt
+        (call
+          (ident print_char)
+          (args
+            (char-lit '\n'))))
+      (expr-stmt
+        (call
+          (ident print_string)
+          (args
+            (str-lit "quote:\" backslash:\\ single:\'"))))
+      (expr-stmt
+        (call
+          (ident print_char)
+          (args
+            (char-lit '\n'))))
+      (expr-stmt
+        (call
+          (ident print_char)
+          (args
+            (char-lit 'a'))))
+      (expr-stmt
+        (call
+          (ident print_char)
+          (args
+            (char-lit 'Z'))))
+      (expr-stmt
+        (call
+          (ident print_char)
+          (args
+            (char-lit '0'))))
+      (expr-stmt
+        (call
+          (ident print_char)
+          (args
+            (char-lit ' '))))
+      (expr-stmt
+        (call
+          (ident print_char)
+          (args
+            (char-lit '\t'))))
+      (expr-stmt
+        (call
+          (ident print_char)
+          (args
+            (char-lit '\n'))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (char-lit 'A'))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary -
+              (char-lit 'a')
+              (char-lit 'A')))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary >
+              (char-lit 'z')
+              (char-lit 'a')))))
+      (local-var char[6] greeting
+        (init
+          (str-lit "hello")))
+      (expr-stmt
+        (call
+          (ident print_string)
+          (args
+            (ident greeting))))
+      (expr-stmt
+        (call
+          (ident print_char)
+          (args
+            (char-lit '\n'))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (index
+              (ident greeting)
+              (int-lit 0)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (index
+              (ident greeting)
+              (int-lit 4)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (call
+              (ident length)
+              (args
+                (str-lit "counted"))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (call
+              (ident length)
+              (args
+                (ident greeting))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (call
+              (ident length)
+              (args
+                (str-lit ""))))))
+      (local-var char[4] word
+        (init
+          (str-lit "abc")))
+      (for
+        (init
+          (local-var int i
+            (init
+              (int-lit 0))))
+        (cond
+          (binary <
+            (ident i)
+            (int-lit 3)))
+        (step
+          (assign
+            (ident i)
+            (binary +
+              (ident i)
+              (int-lit 1))))
+        (block
+          (expr-stmt
+            (call
+              (ident print_char)
+              (args
+                (index
+                  (ident word)
+                  (ident i)))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (index
+              (ident word)
+              (int-lit 3)))))
+      (expr-stmt
+        (call
+          (ident print_char)
+          (args
+            (char-lit '\n'))))
+      (return
+        (int-lit 0)))))

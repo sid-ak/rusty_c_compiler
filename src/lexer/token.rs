@@ -4,6 +4,7 @@
 //! in `docs/architecture.md` rather than only what a scanner happens to recognize today.
 
 use std::fmt;
+use std::fmt::Write as _;
 
 use crate::diagnostics::Span;
 
@@ -70,6 +71,26 @@ keywords! {
         Break => "break",
         Continue => "continue",
     }
+}
+
+/// The words C reserves that this subset does not implement.
+///
+/// Together with [`Keyword`] this is C89's complete keyword set, split in two. The lexer treats
+/// these as ordinary identifiers — they are not part of this grammar — but the parser consults the
+/// list before it rejects one, so `struct point p;` is reported as a construct this compiler lacks
+/// rather than as a program that is malformed. Someone writing real C deserves the first answer.
+pub const UNSUPPORTED_KEYWORDS: [&str; 22] = [
+    "auto", "case", "const", "default", "do", "double", "enum", "extern", "float", "goto", "long",
+    "register", "short", "signed", "sizeof", "static", "struct", "switch", "typedef", "union",
+    "unsigned", "volatile",
+];
+
+/// The C keyword `text` spells that this subset leaves out, if it spells one.
+pub fn unsupported_keyword(text: &str) -> Option<&'static str> {
+    UNSUPPORTED_KEYWORDS
+        .iter()
+        .copied()
+        .find(|&word| word == text)
 }
 
 /// The escape sequences this subset understands, as (the letter after the backslash, the byte it
@@ -191,18 +212,8 @@ impl fmt::Display for TokenKind {
         match self {
             TokenKind::Ident(name) => formatter.write_str(name),
             TokenKind::IntLit(value) => write!(formatter, "{value}"),
-            TokenKind::CharLit(byte) => {
-                formatter.write_str("'")?;
-                write_escaped(formatter, *byte)?;
-                formatter.write_str("'")
-            }
-            TokenKind::StrLit(bytes) => {
-                formatter.write_str("\"")?;
-                for &byte in bytes {
-                    write_escaped(formatter, byte)?;
-                }
-                formatter.write_str("\"")
-            }
+            TokenKind::CharLit(byte) => write!(formatter, "'{}'", spell_literal(&[*byte])),
+            TokenKind::StrLit(bytes) => write!(formatter, "\"{}\"", spell_literal(bytes)),
             // Everything else spells itself. The four value-carrying kinds are matched above, so
             // the fallback is unreachable; it exists because `Display` cannot fail here.
             fixed => formatter.write_str(fixed.fixed_spelling().unwrap_or("<token>")),
@@ -253,15 +264,27 @@ impl TokenKind {
     }
 }
 
-/// Write `byte` as it would be spelled inside a literal, escaping it where C requires.
-fn write_escaped(formatter: &mut fmt::Formatter<'_>, byte: u8) -> fmt::Result {
-    if let Some(letter) = escape_letter(byte) {
-        write!(formatter, "\\{}", char::from(letter))
-    } else if byte.is_ascii_graphic() || byte == b' ' {
-        write!(formatter, "{}", char::from(byte))
-    } else {
-        write!(formatter, "\\x{byte:02x}")
+/// Spell `bytes` as they would be written inside a literal, escaping where C requires.
+///
+/// The one place a decoded literal is turned back into source text, so a diagnostic, a token dump,
+/// and an AST dump cannot disagree about what `\n` looks like. Callers add the surrounding quotes,
+/// since the same body serves both literal forms.
+pub fn spell_literal(bytes: &[u8]) -> String {
+    let mut spelled = String::with_capacity(bytes.len());
+
+    for &byte in bytes {
+        if let Some(letter) = escape_letter(byte) {
+            spelled.push('\\');
+            spelled.push(char::from(letter));
+        } else if byte.is_ascii_graphic() || byte == b' ' {
+            spelled.push(char::from(byte));
+        } else {
+            // Writing to a String cannot fail, so there is no error path worth propagating.
+            let _ = write!(spelled, "\\x{byte:02x}");
+        }
     }
+
+    spelled
 }
 
 /// A token: what it is, and where it came from.
@@ -459,6 +482,37 @@ mod tests {
         }
     }
 
+    /// The two keyword lists partition C89's 32 reserved words: nothing is in both, and nothing
+    /// real C reserves is missing from either. A word in neither would be silently accepted as a
+    /// variable name, which is how `int static;` would sneak through.
+    #[test]
+    fn the_two_keyword_lists_partition_c89() {
+        let mut all: Vec<&str> = Keyword::ALL.iter().map(|k| k.spelling()).collect();
+        all.extend(UNSUPPORTED_KEYWORDS);
+        all.sort_unstable();
+
+        assert_eq!(
+            all,
+            [
+                "auto", "break", "case", "char", "const", "continue", "default", "do", "double",
+                "else", "enum", "extern", "float", "for", "goto", "if", "int", "long", "register",
+                "return", "short", "signed", "sizeof", "static", "struct", "switch", "typedef",
+                "union", "unsigned", "void", "volatile", "while",
+            ]
+        );
+    }
+
+    /// A word the subset leaves out is recognized as such; one it implements, and one nobody
+    /// reserves, are not.
+    #[test]
+    fn unsupported_keywords_are_recognized_by_name() {
+        assert_eq!(unsupported_keyword("struct"), Some("struct"));
+        assert_eq!(unsupported_keyword("sizeof"), Some("sizeof"));
+        assert_eq!(unsupported_keyword("int"), None);
+        assert_eq!(unsupported_keyword("total"), None);
+        assert_eq!(unsupported_keyword("Struct"), None);
+    }
+
     /// The escape table reads the same in both directions, which is what keeps the lexer's
     /// decoding and the renderer's spelling from drifting apart.
     #[test]
@@ -495,6 +549,15 @@ mod tests {
     fn unprintable_bytes_render_as_hex() {
         assert_eq!(TokenKind::CharLit(0x01).to_string(), r"'\x01'");
         assert_eq!(TokenKind::CharLit(0xff).to_string(), r"'\xff'");
+    }
+
+    /// Spelling a literal body is quote-free, so both literal forms and the AST dump share it.
+    #[test]
+    fn spelling_a_literal_body_adds_no_quotes() {
+        assert_eq!(spell_literal(b""), "");
+        assert_eq!(spell_literal(b"hi"), "hi");
+        assert_eq!(spell_literal(b"a\tb"), r"a\tb");
+        assert_eq!(spell_literal(&[0x01]), r"\x01");
     }
 
     /// A token pairs a kind with the span it was scanned from, and displays as its kind.

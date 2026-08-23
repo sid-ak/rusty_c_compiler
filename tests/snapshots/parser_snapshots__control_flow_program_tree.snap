@@ -1,0 +1,360 @@
+---
+source: tests/parser_snapshots.rs
+expression: "dump(&Path::new(CORPUS).join(\"control_flow.c\"))"
+---
+(program
+  (func-decl void print_int
+    (params
+      (param int n)))
+  (func-decl void print_char
+    (params
+      (param char c)))
+  (func-def int main
+    (params)
+    (block
+      (local-var int i
+        (init
+          (int-lit 0)))
+      (local-var int total
+        (init
+          (int-lit 0)))
+      (if
+        (binary ==
+          (ident i)
+          (int-lit 0))
+        (then
+          (block
+            (expr-stmt
+              (call
+                (ident print_int)
+                (args
+                  (int-lit 1)))))))
+      (if
+        (binary !=
+          (ident i)
+          (int-lit 0))
+        (then
+          (block
+            (expr-stmt
+              (call
+                (ident print_int)
+                (args
+                  (int-lit 2))))))
+        (else
+          (block
+            (expr-stmt
+              (call
+                (ident print_int)
+                (args
+                  (int-lit 3)))))))
+      (if
+        (binary >
+          (ident i)
+          (int-lit 0))
+        (then
+          (block
+            (expr-stmt
+              (call
+                (ident print_int)
+                (args
+                  (int-lit 4))))))
+        (else
+          (if
+            (binary <
+              (ident i)
+              (int-lit 0))
+            (then
+              (block
+                (expr-stmt
+                  (call
+                    (ident print_int)
+                    (args
+                      (int-lit 5))))))
+            (else
+              (block
+                (expr-stmt
+                  (call
+                    (ident print_int)
+                    (args
+                      (int-lit 6)))))))))
+      (if
+        (binary ==
+          (ident i)
+          (int-lit 0))
+        (then
+          (if
+            (binary ==
+              (ident i)
+              (int-lit 1))
+            (then
+              (expr-stmt
+                (call
+                  (ident print_int)
+                  (args
+                    (int-lit 7)))))
+            (else
+              (expr-stmt
+                (call
+                  (ident print_int)
+                  (args
+                    (int-lit 8))))))))
+      (while
+        (binary <
+          (ident i)
+          (int-lit 3))
+        (block
+          (expr-stmt
+            (assign
+              (ident total)
+              (binary +
+                (ident total)
+                (ident i))))
+          (expr-stmt
+            (assign
+              (ident i)
+              (binary +
+                (ident i)
+                (int-lit 1))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (ident total))))
+      (for
+        (init
+          (local-var int j
+            (init
+              (int-lit 0))))
+        (cond
+          (binary <
+            (ident j)
+            (int-lit 3)))
+        (step
+          (assign
+            (ident j)
+            (binary +
+              (ident j)
+              (int-lit 1))))
+        (block
+          (expr-stmt
+            (call
+              (ident print_int)
+              (args
+                (ident j))))))
+      (local-var int k
+        (init
+          (int-lit 0)))
+      (for
+        (init)
+        (cond
+          (binary <
+            (ident k)
+            (int-lit 2)))
+        (step
+          (assign
+            (ident k)
+            (binary +
+              (ident k)
+              (int-lit 1))))
+        (block
+          (expr-stmt
+            (call
+              (ident print_int)
+              (args
+                (ident k))))))
+      (for
+        (init
+          (assign
+            (ident k)
+            (int-lit 0)))
+        (cond
+          (binary <
+            (ident k)
+            (int-lit 2)))
+        (step)
+        (block
+          (expr-stmt
+            (call
+              (ident print_int)
+              (args
+                (ident k))))
+          (expr-stmt
+            (assign
+              (ident k)
+              (binary +
+                (ident k)
+                (int-lit 1))))))
+      (for
+        (init
+          (assign
+            (ident k)
+            (int-lit 0)))
+        (cond)
+        (step
+          (assign
+            (ident k)
+            (binary +
+              (ident k)
+              (int-lit 1))))
+        (block
+          (if
+            (binary >
+              (ident k)
+              (int-lit 1))
+            (then
+              (block
+                (break))))
+          (expr-stmt
+            (call
+              (ident print_int)
+              (args
+                (ident k))))))
+      (expr-stmt
+        (assign
+          (ident k)
+          (int-lit 0)))
+      (for
+        (init)
+        (cond)
+        (step)
+        (block
+          (expr-stmt
+            (assign
+              (ident k)
+              (binary +
+                (ident k)
+                (int-lit 1))))
+          (if
+            (binary >
+              (ident k)
+              (int-lit 2))
+            (then
+              (block
+                (break))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (ident k))))
+      (for
+        (init
+          (local-var int m
+            (init
+              (int-lit 0))))
+        (cond
+          (binary <
+            (ident m)
+            (int-lit 5)))
+        (step
+          (assign
+            (ident m)
+            (binary +
+              (ident m)
+              (int-lit 1))))
+        (block
+          (if
+            (binary ==
+              (binary %
+                (ident m)
+                (int-lit 2))
+              (int-lit 0))
+            (then
+              (block
+                (continue))))
+          (expr-stmt
+            (call
+              (ident print_int)
+              (args
+                (ident m))))))
+      (local-var int p
+        (init
+          (int-lit 0)))
+      (while
+        (binary <
+          (ident p)
+          (int-lit 4))
+        (block
+          (expr-stmt
+            (assign
+              (ident p)
+              (binary +
+                (ident p)
+                (int-lit 1))))
+          (if
+            (binary ==
+              (ident p)
+              (int-lit 2))
+            (then
+              (block
+                (continue))))
+          (expr-stmt
+            (call
+              (ident print_int)
+              (args
+                (ident p))))))
+      (for
+        (init
+          (local-var int r
+            (init
+              (int-lit 0))))
+        (cond
+          (binary <
+            (ident r)
+            (int-lit 2)))
+        (step
+          (assign
+            (ident r)
+            (binary +
+              (ident r)
+              (int-lit 1))))
+        (block
+          (for
+            (init
+              (local-var int c
+                (init
+                  (int-lit 0))))
+            (cond
+              (binary <
+                (ident c)
+                (int-lit 4)))
+            (step
+              (assign
+                (ident c)
+                (binary +
+                  (ident c)
+                  (int-lit 1))))
+            (block
+              (if
+                (binary ==
+                  (ident c)
+                  (int-lit 2))
+                (then
+                  (block
+                    (break))))
+              (expr-stmt
+                (call
+                  (ident print_int)
+                  (args
+                    (binary +
+                      (binary *
+                        (ident r)
+                        (int-lit 10))
+                      (ident c)))))))))
+      (block
+        (local-var int shadowed
+          (init
+            (int-lit 100)))
+        (block
+          (expr-stmt
+            (call
+              (ident print_int)
+              (args
+                (ident shadowed))))))
+      (empty)
+      (expr-stmt
+        (call
+          (ident print_char)
+          (args
+            (char-lit '\n'))))
+      (return
+        (int-lit 0)))))

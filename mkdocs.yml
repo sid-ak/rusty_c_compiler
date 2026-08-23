@@ -29,6 +29,10 @@ not_in_nav: |
 nav:
   - Home: index.md
   - Architecture: architecture.md
+  - Explanations:
+      - Overview: explanations/index.md
+      - Phase 1 — Foundation, diagnostics, and the lexer: explanations/Phase-1-Explanation.md
+      - Phase 2 — The AST and the parser: explanations/Phase-2-Explanation.md
   - Cheatsheet: CHEATSHEET.md
   - API Reference: api.md
   - Pragmatic Testing: PRAGMATIC_TESTING.md

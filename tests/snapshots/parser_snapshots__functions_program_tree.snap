@@ -1,0 +1,291 @@
+---
+source: tests/parser_snapshots.rs
+expression: "dump(&Path::new(CORPUS).join(\"functions.c\"))"
+---
+(program
+  (func-decl void print_int
+    (params
+      (param int n)))
+  (func-decl void print_char
+    (params
+      (param char c)))
+  (func-decl int factorial
+    (params
+      (param int n)))
+  (func-decl int fibonacci
+    (params
+      (param int n)))
+  (func-decl int sum_nine
+    (params
+      (param int a)
+      (param int b)
+      (param int c)
+      (param int d)
+      (param int e)
+      (param int f)
+      (param int g)
+      (param int h)
+      (param int i)))
+  (global-var int global_counter)
+  (func-def void bump
+    (params)
+    (block
+      (expr-stmt
+        (assign
+          (ident global_counter)
+          (binary +
+            (ident global_counter)
+            (int-lit 1))))))
+  (func-def int zero
+    (params)
+    (block
+      (return
+        (int-lit 0))))
+  (func-def int identity
+    (params
+      (param int n))
+    (block
+      (return
+        (ident n))))
+  (func-def int add
+    (params
+      (param int a)
+      (param int b))
+    (block
+      (return
+        (binary +
+          (ident a)
+          (ident b)))))
+  (func-def int sum_eight
+    (params
+      (param int a)
+      (param int b)
+      (param int c)
+      (param int d)
+      (param int e)
+      (param int f)
+      (param int g)
+      (param int h))
+    (block
+      (return
+        (binary +
+          (binary +
+            (binary +
+              (binary +
+                (binary +
+                  (binary +
+                    (binary +
+                      (ident a)
+                      (ident b))
+                    (ident c))
+                  (ident d))
+                (ident e))
+              (ident f))
+            (ident g))
+          (ident h)))))
+  (func-def int sum_nine
+    (params
+      (param int a)
+      (param int b)
+      (param int c)
+      (param int d)
+      (param int e)
+      (param int f)
+      (param int g)
+      (param int h)
+      (param int i))
+    (block
+      (return
+        (binary +
+          (call
+            (ident sum_eight)
+            (args
+              (ident a)
+              (ident b)
+              (ident c)
+              (ident d)
+              (ident e)
+              (ident f)
+              (ident g)
+              (ident h)))
+          (ident i)))))
+  (func-def int factorial
+    (params
+      (param int n))
+    (block
+      (if
+        (binary <=
+          (ident n)
+          (int-lit 1))
+        (then
+          (block
+            (return
+              (int-lit 1)))))
+      (return
+        (binary *
+          (ident n)
+          (call
+            (ident factorial)
+            (args
+              (binary -
+                (ident n)
+                (int-lit 1))))))))
+  (func-def int fibonacci
+    (params
+      (param int n))
+    (block
+      (if
+        (binary <
+          (ident n)
+          (int-lit 2))
+        (then
+          (block
+            (return
+              (ident n)))))
+      (return
+        (binary +
+          (call
+            (ident fibonacci)
+            (args
+              (binary -
+                (ident n)
+                (int-lit 1))))
+          (call
+            (ident fibonacci)
+            (args
+              (binary -
+                (ident n)
+                (int-lit 2))))))))
+  (func-def int main
+    (params)
+    (block
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (call
+              (ident zero)
+              (args)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (call
+              (ident identity)
+              (args
+                (int-lit 42))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (call
+              (ident add)
+              (args
+                (int-lit 2)
+                (int-lit 3))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (call
+              (ident add)
+              (args
+                (call
+                  (ident add)
+                  (args
+                    (int-lit 1)
+                    (int-lit 2)))
+                (call
+                  (ident add)
+                  (args
+                    (int-lit 3)
+                    (int-lit 4))))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (call
+              (ident sum_eight)
+              (args
+                (int-lit 1)
+                (int-lit 2)
+                (int-lit 3)
+                (int-lit 4)
+                (int-lit 5)
+                (int-lit 6)
+                (int-lit 7)
+                (int-lit 8))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (call
+              (ident sum_nine)
+              (args
+                (int-lit 1)
+                (int-lit 2)
+                (int-lit 3)
+                (int-lit 4)
+                (int-lit 5)
+                (int-lit 6)
+                (int-lit 7)
+                (int-lit 8)
+                (int-lit 9))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (call
+              (ident factorial)
+              (args
+                (int-lit 5))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (call
+              (ident fibonacci)
+              (args
+                (int-lit 10))))))
+      (expr-stmt
+        (assign
+          (ident global_counter)
+          (int-lit 0)))
+      (expr-stmt
+        (call
+          (ident bump)
+          (args)))
+      (expr-stmt
+        (call
+          (ident bump)
+          (args)))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (ident global_counter))))
+      (local-var int n
+        (init
+          (int-lit 0)))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (call
+              (ident identity)
+              (args
+                (assign
+                  (ident n)
+                  (int-lit 7)))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (ident n))))
+      (expr-stmt
+        (call
+          (ident print_char)
+          (args
+            (char-lit '\n'))))
+      (return
+        (int-lit 0)))))

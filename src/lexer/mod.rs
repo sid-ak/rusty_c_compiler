@@ -17,7 +17,7 @@ pub mod token;
 
 use std::fmt::Write as _;
 
-use crate::diagnostics::{Diagnostic, DiagnosticBag, SourceMap, Span};
+use crate::diagnostics::{Diagnostic, DiagnosticBag, DiagnosticKind, SourceMap, Span};
 
 pub use token::{Keyword, Token, TokenKind};
 
@@ -138,6 +138,11 @@ impl Lexer<'_> {
             b'>' => Some(self.one_or_two(b'=', TokenKind::GtEq, TokenKind::Gt)),
             b'&' => self.paired_only(b'&', TokenKind::AmpAmp, start),
             b'|' => self.paired_only(b'|', TokenKind::PipePipe, start),
+
+            // Punctuation of real C that this grammar has no token for at all. The parser can
+            // never report these, because nothing reaches it to report — so the judgement is made
+            // here, where the character is still in hand.
+            b'#' | b'?' | b':' | b'^' | b'~' => self.unsupported_punctuation(byte, start),
 
             b'*' => Some(TokenKind::Star),
             b'/' => Some(TokenKind::Slash),
@@ -393,15 +398,30 @@ impl Lexer<'_> {
         }
 
         let spelling = char::from(expected);
-        self.report(
-            Diagnostic::lex(
-                Span::new(start, self.offset),
-                format!("'{spelling}' is not supported in this C subset"),
-            )
-            .with_note(format!("did you mean '{spelling}{spelling}'?")),
-        );
+        self.unsupported(start, format!("did you mean '{spelling}{spelling}'?"));
 
         None
+    }
+
+    /// A character that spells a C construct this subset leaves out entirely.
+    fn unsupported_punctuation(&mut self, byte: u8, start: usize) -> Option<TokenKind> {
+        let note = match byte {
+            b'#' => "this subset has no preprocessor, so no directive has any meaning here",
+            b'?' | b':' => "the conditional operator is not in this subset; use an 'if' statement",
+            _ => "the bitwise operators are not in this subset",
+        };
+        self.unsupported(start, note);
+
+        None
+    }
+
+    /// Report the character at `start` as real C this subset does not implement, with `note`
+    /// beneath it saying what to reach for instead.
+    fn unsupported(&mut self, start: usize, note: impl Into<String>) {
+        let span = Span::new(start, self.offset);
+        let construct = format!("'{}'", self.text(span));
+
+        self.report(Diagnostic::unsupported(DiagnosticKind::Lex, span, construct).with_note(note));
     }
 
     /// Record a lexing diagnostic at `span`.
@@ -908,10 +928,7 @@ mod tests {
             ),
             ("@", "stray '@' in program", "@"),
             ("$", "stray '$' in program", "$"),
-            ("#", "stray '#' in program", "#"),
             ("`", "stray '`' in program", "`"),
-            ("&", "'&' is not supported in this C subset", "&"),
-            ("|", "'|' is not supported in this C subset", "|"),
         ];
 
         for (source, message, offending) in cases {
@@ -919,13 +936,48 @@ mod tests {
         }
     }
 
-    /// The unsupported bitwise operators say what to write instead.
+    /// Punctuation of real C that this grammar has no token for is named as unsupported rather
+    /// than as a stray byte, in the same words the parser uses for the constructs it catches.
+    ///
+    /// The parser cannot report these: there is no token for `?` or `#`, so nothing about them
+    /// ever reaches it.
     #[test]
-    fn lone_bitwise_operators_suggest_the_doubled_form() {
-        let lexed = lex(b"a & b");
-        let diagnostic = lexed.diagnostics.first().expect("expected a diagnostic");
+    fn unsupported_punctuation_is_named_not_called_stray() {
+        for character in ["&", "|", "#", "?", ":", "^", "~"] {
+            assert_one_error(
+                character,
+                &format!("unsupported in this C subset: '{character}'"),
+                character,
+            );
+        }
+    }
 
-        assert_eq!(diagnostic.notes, ["did you mean '&&'?"]);
+    /// Each unsupported character says what to reach for instead.
+    #[test]
+    fn unsupported_punctuation_says_what_to_do_instead() {
+        let cases = [
+            ("a & b", "did you mean '&&'?"),
+            ("a | b", "did you mean '||'?"),
+            (
+                "#include <stdio.h>",
+                "this subset has no preprocessor, so no directive has any meaning here",
+            ),
+            (
+                "a ? b : c",
+                "the conditional operator is not in this subset; use an 'if' statement",
+            ),
+            ("a ^ b", "the bitwise operators are not in this subset"),
+        ];
+
+        for (source, note) in cases {
+            let lexed = lex(source.as_bytes());
+            let diagnostic = lexed
+                .diagnostics
+                .first()
+                .unwrap_or_else(|| panic!("expected a diagnostic for {source:?}"));
+
+            assert_eq!(diagnostic.notes, [note], "for {source:?}");
+        }
     }
 
     /// An over-large literal says what the limit is and how to write `INT_MIN` within it.

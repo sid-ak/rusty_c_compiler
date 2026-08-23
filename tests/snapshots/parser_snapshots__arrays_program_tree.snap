@@ -1,0 +1,281 @@
+---
+source: tests/parser_snapshots.rs
+expression: "dump(&Path::new(CORPUS).join(\"arrays.c\"))"
+---
+(program
+  (func-decl void print_int
+    (params
+      (param int n)))
+  (func-decl void print_char
+    (params
+      (param char c)))
+  (global-var int[4] totals)
+  (func-def int sum
+    (params
+      (param int[] values)
+      (param int count))
+    (block
+      (local-var int total
+        (init
+          (int-lit 0)))
+      (for
+        (init
+          (local-var int i
+            (init
+              (int-lit 0))))
+        (cond
+          (binary <
+            (ident i)
+            (ident count)))
+        (step
+          (assign
+            (ident i)
+            (binary +
+              (ident i)
+              (int-lit 1))))
+        (block
+          (expr-stmt
+            (assign
+              (ident total)
+              (binary +
+                (ident total)
+                (index
+                  (ident values)
+                  (ident i)))))))
+      (return
+        (ident total))))
+  (func-def void fill
+    (params
+      (param int[] values)
+      (param int count)
+      (param int value))
+    (block
+      (for
+        (init
+          (local-var int i
+            (init
+              (int-lit 0))))
+        (cond
+          (binary <
+            (ident i)
+            (ident count)))
+        (step
+          (assign
+            (ident i)
+            (binary +
+              (ident i)
+              (int-lit 1))))
+        (block
+          (expr-stmt
+            (assign
+              (index
+                (ident values)
+                (ident i))
+              (ident value)))))))
+  (func-def int main
+    (params)
+    (block
+      (local-var int[5] numbers)
+      (for
+        (init
+          (local-var int i
+            (init
+              (int-lit 0))))
+        (cond
+          (binary <
+            (ident i)
+            (int-lit 5)))
+        (step
+          (assign
+            (ident i)
+            (binary +
+              (ident i)
+              (int-lit 1))))
+        (block
+          (expr-stmt
+            (assign
+              (index
+                (ident numbers)
+                (ident i))
+              (binary *
+                (ident i)
+                (ident i))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (index
+              (ident numbers)
+              (int-lit 0)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (index
+              (ident numbers)
+              (int-lit 4)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary +
+              (index
+                (ident numbers)
+                (int-lit 2))
+              (index
+                (ident numbers)
+                (int-lit 3))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (call
+              (ident sum)
+              (args
+                (ident numbers)
+                (int-lit 5))))))
+      (local-var int[4] primes
+        (init-list
+          (int-lit 2)
+          (int-lit 3)
+          (int-lit 5)
+          (int-lit 7)))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (index
+              (ident primes)
+              (int-lit 0)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (index
+              (ident primes)
+              (int-lit 3)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (call
+              (ident sum)
+              (args
+                (ident primes)
+                (int-lit 4))))))
+      (local-var int[3] partial
+        (init-list
+          (int-lit 1)
+          (int-lit 2)))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (binary +
+              (index
+                (ident partial)
+                (int-lit 0))
+              (index
+                (ident partial)
+                (int-lit 1))))))
+      (local-var int index
+        (init
+          (int-lit 1)))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (index
+              (ident primes)
+              (binary +
+                (ident index)
+                (int-lit 1))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (postfix ++
+              (index
+                (ident primes)
+                (ident index))))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (index
+              (ident primes)
+              (ident index)))))
+      (expr-stmt
+        (assign
+          (index
+            (ident numbers)
+            (int-lit 0))
+          (index
+            (ident primes)
+            (int-lit 0))))
+      (expr-stmt
+        (assign
+          (index
+            (ident numbers)
+            (int-lit 1))
+          (binary *
+            (index
+              (ident numbers)
+              (int-lit 0))
+            (int-lit 2))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (index
+              (ident numbers)
+              (int-lit 0)))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (index
+              (ident numbers)
+              (int-lit 1)))))
+      (expr-stmt
+        (call
+          (ident fill)
+          (args
+            (ident totals)
+            (int-lit 4)
+            (int-lit 6))))
+      (expr-stmt
+        (call
+          (ident print_int)
+          (args
+            (call
+              (ident sum)
+              (args
+                (ident totals)
+                (int-lit 4))))))
+      (local-var char[3] letters
+        (init-list
+          (char-lit 'a')
+          (char-lit 'b')
+          (char-lit 'c')))
+      (expr-stmt
+        (call
+          (ident print_char)
+          (args
+            (index
+              (ident letters)
+              (int-lit 0)))))
+      (expr-stmt
+        (call
+          (ident print_char)
+          (args
+            (index
+              (ident letters)
+              (int-lit 2)))))
+      (expr-stmt
+        (call
+          (ident print_char)
+          (args
+            (char-lit '\n'))))
+      (return
+        (int-lit 0)))))
