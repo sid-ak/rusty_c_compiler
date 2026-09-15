@@ -5,4 +5,5 @@
 //! `docs/dive-deep/semantic-analysis.md`; the rule that the answers live beside the AST rather
 //! than in it is ADR 0004.
 
+pub mod scope;
 pub mod types;
