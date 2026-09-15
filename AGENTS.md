@@ -128,6 +128,3 @@ or move the program out of the corpus to make the suite green — `clang` is the
 - Run the full gate green before handing off:
   `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && uv run mkdocs build --strict`.
 - Close the issue from the PR body with `Closes #N`, and tick the box on the phase epic.
-- Never commit; only stage. Do not run `git commit`. At the end of a set of changes, `git add` the
-  relevant files and leave them staged for the human to review — but only if nothing is currently
-  staged. If anything is already staged, do not stage at all; leave the working tree as-is.
