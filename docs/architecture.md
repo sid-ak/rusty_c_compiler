@@ -287,7 +287,7 @@ rusty_c_compiler/
 │       └── architecture.svg
 ├── runtime/
 │   └── shim.c                  # print_int / print_char / print_string
-├── src/
+├── src/                        # each module's unit tests sit in its own tests.rs, e.g. lexer/tests.rs
 │   ├── main.rs                 # argv parsing, exit codes
 │   ├── lib.rs                  # public compile() entry point
 │   ├── diagnostics.rs          # Span, SourceMap, Diagnostic, DiagnosticBag, renderer

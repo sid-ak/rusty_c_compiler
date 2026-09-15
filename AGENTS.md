@@ -67,6 +67,11 @@ pass.
 - Assert on structure, not on coincidence. A precedence test asserts the AST shape; a codegen test
   asserts the program's observable behavior. `1+2*3 == 7` would also pass with precedence wrong for
   a compensating reason.
+- Unit tests live in their own file, not at the bottom of the code they test. The source file ends
+  with `#[cfg(test)] mod tests;`, and the tests go in the module's `tests.rs`: beside `mod.rs` or
+  `lib.rs` (`src/lexer/tests.rs`), or in a directory named after any other file
+  (`src/ast/tests.rs`). Rust still treats that file as a child module, so the tests reach private
+  items. Integration tests that use only the public API go in `tests/`.
 - Rustdoc comments are mandatory on every module, type, function, and test, including test helpers.
   A test's docstring states the behavior it pins. Keep to one line unless the why is non-obvious.
   `#![deny(missing_docs)]` on the crate makes this a build failure rather than a review comment.

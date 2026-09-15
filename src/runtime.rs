@@ -18,15 +18,4 @@ pub fn shim_object() -> &'static Path {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The build script produced the object, so anything linking against it has a file to link.
-    #[test]
-    fn the_shim_object_exists() {
-        assert!(
-            shim_object().is_file(),
-            "expected the build script to have compiled {SHIM_OBJECT}"
-        );
-    }
-}
+mod tests;
