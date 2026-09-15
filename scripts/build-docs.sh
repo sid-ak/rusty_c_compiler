@@ -66,6 +66,11 @@ cp -R target/doc docs/api
 # page only lists crates, while docs/api.md explains what the reference is and links into the crate
 # at /api/rustycc/. Nothing here should write docs/api/index.html — MkDocs would overwrite it.
 
+echo "==> checking the phase diagrams are current"
+# docs/assets/phase-N.svg are generated from architecture.svg. A change to the architecture diagram
+# without regenerating them would leave the phase explanations showing an older architecture.
+python3 scripts/phase_diagrams.py --check
+
 echo "==> building the prose site"
 # --strict catches a broken internal link or a page missing from the nav. Because the API reference
 # is staged above, docs/api.md's link to it is checked here too rather than being taken on trust.
