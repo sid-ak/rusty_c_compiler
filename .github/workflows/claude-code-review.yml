@@ -60,6 +60,18 @@ jobs:
           # the visibility; the full stream is a debugging tool worth turning on deliberately
           # and briefly, not leaving on.
           display_report: "true"
+          # TEMPORARY, for debugging why re-reviews stop early: prints every message and tool
+          # result to the public log.
+          show_full_output: "true"
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
+
+      # TEMPORARY, for debugging: the full transcript, downloadable with `gh run download`.
+      - name: Upload Claude transcript
+        if: always() && steps.claude-review.outputs.execution_file != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-review-transcript
+          path: ${{ steps.claude-review.outputs.execution_file }}
+          retention-days: 3
 
