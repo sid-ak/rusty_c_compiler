@@ -244,6 +244,28 @@ A lone `&` is real C, so it is reported as unsupported rather than as a stray by
 nothing about them ever reaches the parser and the lexer is the only place that can say anything.
 A byte that is not C at all, like `@`, is still a stray character.
 
+A `#` that starts a line begins a preprocessor directive, which is reported once and skipped whole:
+
+```bash
+printf '#define SUM(a, b) \\\n    ((a) + (b))\nint x = a # b;\n' > /tmp/directive.c
+./target/debug/rustycc /tmp/directive.c --dump-tokens
+```
+
+```
+/tmp/directive.c:1:1: error: unsupported in this C subset: preprocessor directives
+#define SUM(a, b) \
+^~~~~~~~~~~~~~~~~~~
+note: this subset has no preprocessor, so no directive has any meaning here
+/tmp/directive.c:3:11: error: unsupported in this C subset: '#'
+int x = a # b;
+          ^
+note: this subset has no preprocessor, so no directive has any meaning here
+```
+
+- The backslash at the end of line 1 continues the directive onto line 2, so the macro body produces
+  no diagnostics of its own.
+- The `#` on line 3 follows a token on its line, so it is not a directive and is reported alone.
+
 ### 9. Several structural errors in one file
 
 ```bash

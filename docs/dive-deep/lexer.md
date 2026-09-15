@@ -36,3 +36,16 @@ makes the lexer the only place the judgement can be made. Each is reported as "u
 C subset", the same phrasing [the parser](#the-parser) uses for the constructs it catches, with a
 note saying what to reach for instead. A byte that is not C at all, such as `@`, is still a stray
 character; the distinction is between "this is C we do not implement" and "this is not C".
+
+A `#` is the one character whose meaning depends on where it appears. When it is the first token on
+its line, it begins a preprocessor directive, and the lexer reports the whole directive once and
+skips it:
+
+- The directive ends at the end of its line, as C11 §6.10 defines it, so `#include <stdio.h>` does
+  not go on to report the `.` and `<` inside it.
+- A backslash just before the newline continues the directive onto the next line, so a multi-line
+  `#define` is still one directive.
+- A newline inside a block comment does not start a line, because C treats the whole comment as a
+  single space before it looks for directives.
+
+A `#` anywhere else is reported on its own, like the other punctuation.

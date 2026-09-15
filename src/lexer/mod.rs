@@ -35,6 +35,7 @@ pub fn lex(source: &[u8]) -> Lexed {
     let mut lexer = Lexer {
         source,
         offset: 0,
+        at_line_start: true,
         tokens: Vec::new(),
         diagnostics: DiagnosticBag::new(),
     };
@@ -93,6 +94,9 @@ struct Lexer<'source> {
     source: &'source [u8],
     /// How many bytes have been consumed. Never decreases, which is what guarantees termination.
     offset: usize,
+    /// Whether nothing but whitespace and comments has been scanned since the last newline, which is
+    /// what makes a `#` the start of a preprocessor directive rather than a stray character.
+    at_line_start: bool,
     /// Tokens produced so far.
     tokens: Vec<Token>,
     /// Problems found so far.
@@ -116,6 +120,7 @@ impl Lexer<'_> {
                 self.tokens
                     .push(Token::new(kind, Span::new(start, self.offset)));
             }
+            self.at_line_start = false;
         }
     }
 
@@ -138,6 +143,8 @@ impl Lexer<'_> {
             b'>' => Some(self.one_or_two(b'=', TokenKind::GtEq, TokenKind::Gt)),
             b'&' => self.paired_only(b'&', TokenKind::AmpAmp, start),
             b'|' => self.paired_only(b'|', TokenKind::PipePipe, start),
+
+            b'#' if self.at_line_start => self.skip_directive(start),
 
             // Punctuation of real C that this grammar has no token for at all. The parser can
             // never report these, because nothing reaches it to report — so the judgement is made
@@ -172,6 +179,12 @@ impl Lexer<'_> {
             match self.peek() {
                 Some(byte) if byte.is_ascii_whitespace() => {
                     self.bump();
+                    // Only a newline in whitespace starts a line for a directive. One inside a block
+                    // comment does not: C replaces the whole comment with a single space before it
+                    // looks for directives (C11 5.1.1.2, phase 3).
+                    if byte == b'\n' {
+                        self.at_line_start = true;
+                    }
                 }
                 Some(b'/') if self.peek_at(1) == Some(b'/') => self.skip_line_comment(),
                 Some(b'/') if self.peek_at(1) == Some(b'*') => self.skip_block_comment(),
@@ -403,10 +416,61 @@ impl Lexer<'_> {
         None
     }
 
+    /// Skip a preprocessor directive whose `#`, at `start`, is already consumed, and report it once.
+    ///
+    /// A directive runs from a `#` that is the first token on its line to the end of that line
+    /// (C11 6.10p2), and a backslash immediately before the newline splices the next line onto it
+    /// (C11 5.1.1.2, phase 2). The whole directive is one unsupported construct: reporting only the
+    /// `#` and lexing the rest as code would turn `#include <stdio.h>` into a cascade of complaints
+    /// about `.` and `<`. The newline that ends the directive is left for trivia to consume, so the
+    /// next line starts a line.
+    fn skip_directive(&mut self, start: usize) -> Option<TokenKind> {
+        while let Some(byte) = self.peek() {
+            if byte == b'\n' && !self.is_spliced(self.offset) {
+                break;
+            }
+            self.bump();
+        }
+
+        // Trailing whitespace, a `\r` before the newline included, is not part of the directive.
+        let mut end = self.offset;
+        while end > start + 1
+            && self
+                .byte_at(end - 1)
+                .is_some_and(|byte| byte.is_ascii_whitespace())
+        {
+            end -= 1;
+        }
+
+        let span = Span::new(start, end);
+        self.report(
+            Diagnostic::unsupported(DiagnosticKind::Lex, span, "preprocessor directives")
+                .with_note(NO_PREPROCESSOR_NOTE),
+        );
+
+        None
+    }
+
+    /// Whether the newline at `newline` is spliced away by a backslash just before it, allowing for
+    /// a carriage return between the two.
+    fn is_spliced(&self, newline: usize) -> bool {
+        let before = |distance: usize| {
+            newline
+                .checked_sub(distance)
+                .and_then(|at| self.byte_at(at))
+        };
+
+        match before(1) {
+            Some(b'\\') => true,
+            Some(b'\r') => before(2) == Some(b'\\'),
+            _ => false,
+        }
+    }
+
     /// A character that spells a C construct this subset leaves out entirely.
     fn unsupported_punctuation(&mut self, byte: u8, start: usize) -> Option<TokenKind> {
         let note = match byte {
-            b'#' => "this subset has no preprocessor, so no directive has any meaning here",
+            b'#' => NO_PREPROCESSOR_NOTE,
             b'?' | b':' => "the conditional operator is not in this subset; use an 'if' statement",
             _ => "the bitwise operators are not in this subset",
         };
@@ -468,6 +532,10 @@ impl Lexer<'_> {
     }
 }
 
+/// The note beneath any report of preprocessor syntax, whether a whole directive or a stray `#`.
+const NO_PREPROCESSOR_NOTE: &str =
+    "this subset has no preprocessor, so no directive has any meaning here";
+
 /// Whether `byte` can start an identifier.
 fn is_ident_start(byte: u8) -> bool {
     byte.is_ascii_alphabetic() || byte == b'_'
@@ -502,6 +570,9 @@ fn describe_byte(byte: u8) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What a preprocessor directive is reported as.
+    const DIRECTIVE_MESSAGE: &str = "unsupported in this C subset: preprocessor directives";
 
     use std::path::Path;
 
@@ -943,7 +1014,7 @@ mod tests {
     /// ever reaches it.
     #[test]
     fn unsupported_punctuation_is_named_not_called_stray() {
-        for character in ["&", "|", "#", "?", ":", "^", "~"] {
+        for character in ["&", "|", "?", ":", "^", "~"] {
             assert_one_error(
                 character,
                 &format!("unsupported in this C subset: '{character}'"),
@@ -1004,41 +1075,147 @@ mod tests {
         }
     }
 
+    /// Lex `source`, which may contain errors, and return its token kinds and diagnostic messages.
+    fn kinds_and_messages(source: &[u8]) -> (Vec<TokenKind>, Vec<String>) {
+        let lexed = lex(source);
+
+        (
+            lexed.tokens.into_iter().map(|token| token.kind).collect(),
+            lexed
+                .diagnostics
+                .into_iter()
+                .map(|diagnostic| diagnostic.message)
+                .collect(),
+        )
+    }
+
+    /// The kinds of `int x;` followed by the end of the stream, which the recovery tests expect to
+    /// find intact after the construct they recover from.
+    fn int_x_then_eof() -> Vec<TokenKind> {
+        vec![
+            TokenKind::Keyword(Keyword::Int),
+            TokenKind::Ident("x".into()),
+            TokenKind::Semi,
+            TokenKind::Eof,
+        ]
+    }
+
     /// An unterminated literal resynchronizes at the end of its line, so the next line still lexes.
     #[test]
     fn scanning_resumes_on_the_line_after_an_unterminated_literal() {
-        let lexed = lex(b"\"oops\nint x;\n");
+        let (kinds, messages) = kinds_and_messages(b"\"oops\nint x;\n");
 
-        assert_eq!(lexed.diagnostics.len(), 1);
-        let kinds: Vec<_> = lexed.tokens.iter().map(|token| &token.kind).collect();
-        assert_eq!(
-            kinds,
-            [
-                &TokenKind::StrLit(b"oops".to_vec()),
-                &TokenKind::Keyword(Keyword::Int),
-                &TokenKind::Ident("x".into()),
-                &TokenKind::Semi,
-                &TokenKind::Eof,
-            ]
-        );
+        assert_eq!(messages.len(), 1);
+        let mut expected = vec![TokenKind::StrLit(b"oops".to_vec())];
+        expected.extend(int_x_then_eof());
+        assert_eq!(kinds, expected);
     }
 
     /// An unterminated block comment resynchronizes at end of file, swallowing the rest.
     #[test]
     fn an_unterminated_block_comment_runs_to_the_end_of_file() {
-        let lexed = lex(b"int x;\n/* oops\nint y;\n");
+        let (kinds, messages) = kinds_and_messages(b"int x;\n/* oops\nint y;\n");
 
-        assert_eq!(lexed.diagnostics.len(), 1);
-        let kinds: Vec<_> = lexed.tokens.iter().map(|token| &token.kind).collect();
-        assert_eq!(
-            kinds,
-            [
-                &TokenKind::Keyword(Keyword::Int),
-                &TokenKind::Ident("x".into()),
-                &TokenKind::Semi,
-                &TokenKind::Eof,
-            ]
-        );
+        assert_eq!(messages.len(), 1);
+        assert_eq!(kinds, int_x_then_eof());
+    }
+
+    /// A preprocessor directive is one unsupported construct: one diagnostic whose span covers the
+    /// directive, not a report for the `#` followed by more for the rest of the line.
+    #[test]
+    fn a_directive_is_one_diagnostic_spanning_the_directive() {
+        let cases = [
+            ("#include <stdio.h>", "#include <stdio.h>"),
+            ("#define LIMIT 10   ", "#define LIMIT 10"),
+            ("#pragma once\n", "#pragma once"),
+            ("#", "#"),
+        ];
+
+        for (source, directive) in cases {
+            assert_one_error(source, DIRECTIVE_MESSAGE, directive);
+        }
+    }
+
+    /// Scanning resumes on the line after a directive, so the code that follows still lexes.
+    #[test]
+    fn scanning_resumes_on_the_line_after_a_directive() {
+        for source in [
+            "#include <stdio.h>\nint x;\n",
+            "#\nint x;\n",
+            "#if 0 /* a */\r\nint x;\r\n",
+        ] {
+            let (kinds, messages) = kinds_and_messages(source.as_bytes());
+
+            assert_eq!(messages, [DIRECTIVE_MESSAGE], "for {source:?}");
+            assert_eq!(kinds, int_x_then_eof(), "for {source:?}");
+        }
+    }
+
+    /// A backslash before the newline splices the next line onto the directive (C11 5.1.1.2, phase
+    /// 2), so a multi-line macro is still one directive and its body is not lexed as code.
+    #[test]
+    fn a_directive_continues_across_spliced_lines() {
+        let spliced = "#define SUM(a, b) \\\n    ((a) + (b))";
+        assert_one_error(spliced, DIRECTIVE_MESSAGE, spliced);
+
+        for source in [
+            "#define SUM(a, b) \\\n    ((a) + (b))\nint x;\n",
+            "#define ONE \\\r\n    1\r\nint x;\r\n",
+            "#define TWO \\\n \\\n 2\nint x;\n",
+        ] {
+            let (kinds, messages) = kinds_and_messages(source.as_bytes());
+
+            assert_eq!(messages, [DIRECTIVE_MESSAGE], "for {source:?}");
+            assert_eq!(kinds, int_x_then_eof(), "for {source:?}");
+        }
+    }
+
+    /// A directive may follow whitespace or a comment on its own line: what matters is that no token
+    /// precedes the `#` on that line (C11 6.10p2).
+    #[test]
+    fn a_directive_may_be_indented_or_follow_a_comment() {
+        for source in [
+            "  #define X 1",
+            "\t# define X 1",
+            "/* banner */ #define X 1",
+            "int x;\n   #define X 1\n",
+        ] {
+            let (_, messages) = kinds_and_messages(source.as_bytes());
+
+            assert_eq!(messages, [DIRECTIVE_MESSAGE], "for {source:?}");
+        }
+    }
+
+    /// A `#` after a token on the same line is not a directive, so it is the single unsupported
+    /// character and the rest of the line lexes as usual.
+    #[test]
+    fn a_hash_after_a_token_on_its_line_is_a_single_character() {
+        assert_one_error("a # b", "unsupported in this C subset: '#'", "#");
+
+        let (kinds, messages) = kinds_and_messages(b"int # x;");
+        assert_eq!(messages, ["unsupported in this C subset: '#'"]);
+        assert_eq!(kinds, int_x_then_eof());
+    }
+
+    /// A newline inside a block comment does not start a new line for a directive, because the
+    /// comment is replaced by one space before directives are recognized (C11 5.1.1.2, phase 3).
+    #[test]
+    fn a_newline_inside_a_comment_does_not_start_a_directive() {
+        let (_, messages) = kinds_and_messages(b"int a; /* one\ntwo */ # b");
+
+        assert_eq!(messages, ["unsupported in this C subset: '#'"]);
+    }
+
+    /// A directive ending at the end of file, including one whose last line is spliced into nothing,
+    /// still ends the stream in `Eof`.
+    #[test]
+    fn a_directive_at_the_end_of_file_terminates() {
+        for source in ["#include <stdio.h>", "#define X \\", "#define X \\\n"] {
+            let (kinds, messages) = kinds_and_messages(source.as_bytes());
+
+            assert_eq!(messages, [DIRECTIVE_MESSAGE], "for {source:?}");
+            assert_eq!(kinds, [TokenKind::Eof], "for {source:?}");
+        }
     }
 
     /// A file with several mistakes reports all of them, in source order.
