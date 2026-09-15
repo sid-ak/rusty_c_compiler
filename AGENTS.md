@@ -110,7 +110,9 @@ or move the program out of the corpus to make the suite green — `clang` is the
   internal link.
 - A new page must be added to the `nav` in `mkdocs.yml` or the strict build fails.
 - Diagrams live in `docs/assets/` as SVG, hand-written and committed, so they render on GitHub and
-  in the site without a build step.
+  in the site without a build step. The exception is `phase-N.svg`, generated from
+  `architecture.svg` by `scripts/phase_diagrams.py`: edit the architecture diagram, then rerun the
+  script. The docs build fails while a phase diagram is out of date.
 - Keep the architecture document current with the code in the same change, not afterwards. It is the
   first thing anyone reads, and a stale one is worse than none.
 - `README.md` has a "Where it stands today" section that is the project's current-state record.
