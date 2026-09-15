@@ -6,8 +6,9 @@ func_decl      = type ident "(" params ")" ";" ;
 params         = "void" | [ param { "," param } ] ;
 param          = type ident [ "[" "]" ] ;
 
-var_decl       = type ident [ "[" int_lit "]" ] [ "=" initializer ] ";" ;
-initializer    = expr | "{" [ expr { "," expr } ] "}" ;
+var_decl       = var_decl_body ";" ;
+var_decl_body  = type ident [ "[" int_lit "]" ] [ "=" initializer ] ;
+initializer    = expr | "{" [ expr { "," expr } [ "," ] ] "}" ;
 
 type           = "int" | "char" | "void" ;
 
@@ -21,10 +22,11 @@ stmt           = block
                | "break" ";"
                | "continue" ";"
                | [ expr ] ";" ;
-for_init       = var_decl_no_semi | expr ;
+for_init       = var_decl_body | expr ;
 
 expr           = assignment ;
 assignment     = ident_or_index "=" assignment | logical_or ;
+ident_or_index = ident { "[" expr "]" } | "(" ident_or_index ")" ;
 logical_or     = logical_and { "||" logical_and } ;
 logical_and    = equality { "&&" equality } ;
 equality       = relational { ( "==" | "!=" ) relational } ;
@@ -33,4 +35,5 @@ additive       = multiplicative { ( "+" | "-" ) multiplicative } ;
 multiplicative = unary { ( "*" | "/" | "%" ) unary } ;
 unary          = ( "-" | "!" | "+" | "++" | "--" ) unary | postfix ;
 postfix        = primary { "[" expr "]" | "(" args ")" | "++" | "--" } ;
+args           = [ assignment { "," assignment } ] ;
 primary        = int_lit | char_lit | string_lit | ident | "(" expr ")" ;

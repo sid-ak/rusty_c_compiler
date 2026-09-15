@@ -27,3 +27,12 @@ On a malformed construct the lexer records a diagnostic and resynchronizes at a 
 of line for an unterminated literal, end of file for an unterminated block comment — then keeps
 scanning to `Eof`. A lexer that stops at the first error would make the parser's own error recovery
 impossible to test, since the parser would never see tokens past the first lexical mistake.
+
+## Punctuation the subset leaves out is named here, not passed on
+
+`&`, `|`, `#`, `?`, `:`, `^`, and `~` are all real C, and none of them is a token of this grammar.
+There is nothing for the lexer to hand the parser, so the parser could never report them — which
+makes the lexer the only place the judgement can be made. Each is reported as "unsupported in this
+C subset", the same phrasing [the parser](#the-parser) uses for the constructs it catches, with a
+note saying what to reach for instead. A byte that is not C at all, such as `@`, is still a stray
+character; the distinction is between "this is C we do not implement" and "this is not C".

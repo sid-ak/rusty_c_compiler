@@ -13,5 +13,11 @@
 # macOS
 .DS_Store
 
+# Generated: insta's working files. A rejected snapshot is written beside the accepted one as
+# `.snap.new`, and an inline snapshot's pending diff as `.pending-snap`; both are scratch for
+# `cargo insta review` and neither is a record of anything once the review is done.
+*.snap.new
+*.pending-snap
+
 # Generated: rustdoc staged into the docs site by scripts/build-docs.sh
 /docs/api/

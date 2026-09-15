@@ -294,9 +294,9 @@ rusty_c_compiler/
 │   ├── lexer/
 │   │   ├── mod.rs              # byte scanner, literal decoding, resynchronization
 │   │   └── token.rs            # TokenKind, Token, keyword table
-│   ├── ast.rs                  # node types, NodeId, spans — immutable after parsing
+│   ├── ast.rs                  # node types, NodeId, spans, the S-expression dump — immutable
 │   ├── parser/
-│   │   ├── mod.rs              # declarations, statements, error recovery
+│   │   ├── mod.rs              # declarations, statements, error recovery, the depth limit
 │   │   └── expr.rs             # precedence climbing, postfix loop
 │   ├── sema/
 │   │   ├── mod.rs              # two-pass analyzer, annotation output
@@ -311,10 +311,12 @@ rusty_c_compiler/
 │   └── driver.rs               # assemble and link via the system toolchain
 ├── tests/
 │   ├── programs/               # subset-C corpus, one feature area per file
-│   │   ├── COVERAGE.md         # feature-to-program matrix
+│   │   ├── COVERAGE.md         # feature-to-program matrix; a program without a row fails CI
 │   │   └── invalid/            # programs that must be rejected, with the rule each violates
+│   ├── adversarial/            # inputs aimed at the front end's failure modes, not its features
 │   ├── lexer_snapshots.rs
 │   ├── parser_snapshots.rs
+│   ├── parser_no_panic.rs      # truncation corpus: every corpus program cut short at every byte
 │   ├── sema_errors.rs
 │   ├── codegen_exec.rs
 │   ├── codegen_snapshots.rs
