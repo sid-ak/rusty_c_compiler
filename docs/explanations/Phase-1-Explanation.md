@@ -1,124 +1,130 @@
 # Phase 1: Foundation, diagnostics, and the lexer
 
-A walkthrough of what Phase 1 built and why each choice was made, written for a reader with no
-background in Rust and none in compilers. Terms are defined the first time they appear and then used
-normally. The [architecture](../architecture.md) says what the finished system is; the
-[plan](../PLAN.md) says what each phase is meant to deliver; this says what actually got built and
-what the reasoning was.
+## Goal
 
-## The problem this phase solves
+A working Cargo project that can turn a source file into a token stream, with a diagnostic
+system good enough to serve every later phase, plus the CI and runtime-shim infrastructure the whole
+project depends on.
 
-A compiler turns text a person wrote into instructions a machine runs. Before any of that can start,
-two much duller questions have to be answered, and answering them badly poisons everything
-downstream.
+## Outline
 
-The first: how does the compiler read text at all? Not "open the file" — that part is easy — but how
-does it get from a wall of characters to something with structure? The answer is a stage called the
-lexer, and it is Phase 1's centrepiece.
+- [What Was](#what-was)
+- [Overview](#overview)
+- [Components](#components)
+    - [Positions](#positions)
+    - [Tokens](#tokens)
+    - [Scanner](#scanner)
+    - [Runtime Shim](#runtime-shim)
+    - [Scaffolding](#scaffolding)
+- [Learnings](#learnings)
+- [Try It Out](#try-it-out)
+- [What's Next?](#whats-next)
 
-The second: when something is wrong, how does the compiler say so? Every later stage needs to report
-problems, and if each one invents its own way of doing it, the user gets four different styles of
-error message from one program. So the error-reporting machinery gets built once, first, before
-anything has errors to report.
+## What Was
 
-Phase 1 also settles a question that shapes the entire project, which is worth starting with because
-everything else follows from it.
+Before Phase 1 the project consisted of documents only:
 
-## Deciding what "correct" means
+- The [architecture](../architecture.md): the design of the finished compiler, its pipeline of
+  stages, and the grammar of the accepted C subset.
+- Nine [ADRs](../decisions/index.md) (Architectural Decision Records), each capturing one binding
+  decision, the alternatives rejected, and the reasoning.
+- The [implementation plan](../PLAN.md): the five phases, their deliverables, and their exit
+  criteria.
 
-Most projects can dodge this. A compiler cannot. If you write a compiler and it produces a program,
-how do you know the program is right?
+There was no Cargo project, no source code, no tests, and no continuous integration.
 
-The usual answer is: write test programs, work out by hand what each should print, and check. That
-works, but it has a hole in it — you are checking the compiler against your own understanding of
-what the code should do, and your understanding is exactly what might be wrong. If you
-misremembered how C's `%` behaves on negative numbers, you will write the wrong expected answer and
-the test will pass.
+## Overview
 
-This project takes a different route, and it is the reason the input language is a subset of real C
-rather than a small language invented for the occasion. Because the input is genuinely C, `clang` —
-a mature, heavily used, independently written C compiler — can compile the exact same file. Compile
-a program with both, run both, compare what happens. Agreement is evidence that does not depend on
-trusting anyone's assumptions, because nobody wrote down the expected answer. `clang` produced it,
-just by being run.
+Phase 1 builds the first stage of the compiler and the infrastructure every later stage depends on.
 
-That technique is called differential testing, and it is this project's actual definition of
-correct. It is recorded as
-[ADR 0001](../decisions/0001-subset-of-c-with-clang-as-oracle.md). An ADR — Architectural Decision
-Record — is a short document capturing one decision, what was rejected, and why; the project has
-nine of them, and they are binding rather than advisory.
+- The lexer turns the bytes of a C file into a stream of tokens.
+- The diagnostic system gives every stage one way to record a problem at a byte position and render it with a caret under the offending
+text.
+- The runtime shim provides the output functions compiled programs link against.
+    - A program built by `rustycc` and the same program built by `clang` can be run and compared.
+    - The project's definition of correctness, recorded in [ADR 0001](../decisions/0001-subset-of-c-with-clang-as-oracle.md).
+- The phase also sets up the crate, the command line, the lint rules, and CI.
 
-Two consequences land in Phase 1. The subset has to be a real subset, so nothing outside it can be
-quietly accepted. And there has to be a way for a compiled program to produce output that both
-compilers agree on, which is what the runtime shim below is for.
+The parts of the [architecture](../architecture.md#the-pipeline) this phase builds are outlined in
+red:
 
-## Part one: positions, and the errors reported at them
+![Phase 1 in the architecture: the lexer, the DiagnosticBag, and runtime/shim.o](../assets/phase-1.svg)
 
-The file is `src/diagnostics.rs`. Nothing in it is exciting on its own; all of it is used by every
-stage that follows.
+## Components
 
-### A position is a byte offset, not a line and column
+Phase 1 is the first phase, so every component is new:
 
-The obvious way to record where something is in a file is a line number and a column number. This
-project does not do that. It records a `Span` — a pair of byte offsets marking the start and end of
-a range in the file:
+| Component | Role |
+|---|---|
+| [Positions](#positions) | Byte spans, line and column lookup, diagnostics, and their rendering |
+| [Tokens](#tokens) | The vocabulary shared by the lexer and the parser |
+| [Scanner](#scanner) | Source bytes to a token stream, plus `--dump-tokens` |
+| [Runtime Shim](#runtime-shim) | The output functions compiled programs link against |
+| [Scaffolding](#scaffolding) | The structure every later phase builds inside |
+
+### Positions
+
+Positions are used by every stage of the compiler. This component defines how a position is
+recorded and how a problem at that position is reported.
+
+#### Span (`src/diagnostics.rs`)
 
 ```rust
 pub struct Span {
-    pub start: usize,
-    pub end: usize,
+    pub start: usize, // offset of the first byte
+    pub end: usize,   // offset one past the last byte
 }
 ```
 
-The reason is that line and column numbers are only useful when printing a message to a human. They
-are expensive to compute (you have to know how many newlines came before), awkward to compare, and
-they change meaning if the file is split into lines differently. A byte offset is a single number.
-Comparing two of them tells you which came first. Joining two spans to cover both is arithmetic.
+A `Span` is a half-open byte range — it includes `start` and excludes `end`. Byte offsets are used
+instead of line and column numbers for three reasons:
 
-Line and column are worked out at the very last moment, when a message is actually being printed,
-and nowhere else. That conversion is the job of `SourceMap`, which scans the file once when it is
-created and records where every line begins. Looking up an offset is then a binary search through
-that list — repeatedly halving the search range rather than counting newlines from the top of the
-file each time.
+- An offset is a single integer, so comparing two positions is one comparison.
+- Joining two spans into one that covers both, which the parser does constantly, is `min` and
+  `max` arithmetic (`Span::to`).
+- Line and column depend on how the file is divided into lines and are expensive to compute. They
+  are needed only when a message is displayed.
 
-### One shape for every error, from every stage
+A reversed range is clamped to empty rather than rejected, so a miscalculated end offset produces a
+harmless position instead of a crash.
 
-A diagnostic — the general word for a compiler's report about your program — is a value here, not an
-exception:
+The conversion to line and column belongs to `SourceMap`, which records the offset at which each
+line begins when it is created. Converting an offset is then a binary search over that list: the
+search repeatedly halves the candidate range instead of counting newlines from the start of the file.
+The result is a `Location { line, column }`. Both numbers are 1-based, and columns are counted in
+bytes to match `clang`.
+
+> Every stage needs the source file, for scanning it or for quoting a line in a message, and copying
+> it into each would waste memory while a raw pointer to it could outlive the buffer. Rust lifetimes
+> let the file be shared without either risk:
+>
+> - `SourceMap<'source>` and the lexer hold `&'source [u8]`, a borrowed view of the bytes the caller
+>   read, rather than their own copy.
+> - The `'source` lifetime ties each borrow to the original buffer, and the Rust compiler rejects any
+>   code in which a `SourceMap` could still be in use after that buffer is gone.
+> - The check happens entirely at compile time, so sharing costs nothing at run time.
+
+#### Diagnostic (`src/diagnostics.rs`)
 
 ```rust
 pub struct Diagnostic {
-    pub kind: DiagnosticKind,   // which stage reported it
-    pub message: String,        // the one-line description
-    pub span: Span,             // where in the source
-    pub notes: Vec<String>,     // extra context beneath the message
+    pub kind: DiagnosticKind, // Lex, Parse, Semantic, or Internal
+    pub message: String,      // the one-line description after `error:`
+    pub span: Span,           // where the problem is
+    pub notes: Vec<String>,   // further context printed beneath
 }
 ```
 
-The `kind` field records which stage found the problem — lexer, parser, semantic analyzer, or the
-compiler complaining about itself. That is stored rather than baked into the wording so that a test
-can assert "the lexer reported this" without matching on message text, which would break every time
-someone improved the phrasing.
+A diagnostic is a compiler's report about a problem in the program it is compiling.
 
-The `notes` are the part that makes a message worth reading. The message says what is wrong; a note
-says what to do instead. Reporting that an integer is too large is fine; adding "the maximum is
-2147483647; write INT_MIN as -2147483647 - 1" tells you how to fix it.
+- `kind` records which stage reported the problem. Keeping it as a field, rather than in the
+  wording, lets a test assert that the lexer reported an error without depending on the exact
+  message text, which is free to improve.
+- `notes` carry the remedy. The message states what is wrong, and a note states what to do instead.
+  For example, an oversized literal reports the problem, and its note gives the maximum and the
+  portable spelling of the minimum, `-2147483647 - 1`.
 
-### Reporting more than one problem
-
-A `DiagnosticBag` collects diagnostics as a stage runs. A stage records a problem and keeps going
-rather than stopping, so a file with four mistakes reports four of them.
-
-The bag hands them back sorted by position, and this is deliberate rather than incidental. A stage
-does not necessarily find problems in the order they appear in the file — a later stage might
-resolve a forward reference and only then notice something wrong with an earlier line. Sorting at
-the end means the user always reads their mistakes top to bottom, however the compiler happened to
-stumble across them. The sort is stable, meaning two problems at the identical position stay in the
-order they were found.
-
-### The caret line
-
-The rendered form of a diagnostic looks like this:
+`SourceMap::render` produces the displayed form:
 
 ```
 /tmp/errors.c:1:9: error: expected digits after '0x'
@@ -126,258 +132,463 @@ int a = 0x;
         ^~
 ```
 
-The path, line, and column; the message; the offending source line reproduced; and a line of carets
-underneath pointing at the exact characters at fault. That layout deliberately matches what `clang`
-prints, so the two compilers' output is comparable by eye.
+The layout matches `clang`'s:
 
-Three details in the caret line took actual thought, and each is a bug that would otherwise appear
-eventually:
+- The path, line, and column.
+- The message.
+- The offending source line.
+- A caret line underneath, marking the exact bytes at fault.
 
-1.  Tabs. If the source line is indented with tab characters and the caret line pads with spaces,
-    the caret drifts away from what it is pointing at — and drifts differently depending on how wide
-    the terminal draws a tab. So the padding reproduces a tab as a tab. Widen and narrow the
-    terminal and the caret keeps tracking.
-2.  Multi-byte characters. A column is counted in bytes, matching what `clang` reports, but a
-    single character outside ASCII occupies several bytes. Counting those as several columns would
-    push the caret too far right. The padding skips the continuation bytes of a multi-byte
-    character, so one character costs one column.
-3.  Spans that run past the end of a line. A span can cover several lines. Underlining all of it
-    would run the carets off the end of the one line being printed, pointing at nothing. So the
-    underline is clamped to the end of the line, and is never narrower than a single `^` — a
-    zero-width span, like "something is missing here", still has a position worth indicating.
+Three details of the caret line prevent misplaced carets:
 
-## Part two: the token vocabulary
+1. Tabs are reproduced as tabs. Padding a tab-indented line with spaces would shift the caret by a
+   distance that depends on the terminal's tab width.
+2. UTF-8 continuation bytes are skipped when padding. A character outside ASCII occupies several
+   bytes, but it should cost the caret one position, not several.
+3. The underline is clamped to the end of the printed line and is never narrower than one `^`. A
+   span that continues onto later lines is underlined only on its first line, and an empty span —
+   something missing at a position — still receives a marker.
 
-The file is `src/lexer/token.rs`. It defines what the lexer produces.
-
-A token is one meaningful piece of a program. `int x = 5;` is five tokens: the keyword `int`, the
-identifier `x`, the operator `=`, the integer literal `5`, and the punctuation `;`. The lexer's whole
-job is to produce that list. It has no opinion about what any of it means — it does not know this is
-a declaration, only that these are five distinct recognizable things.
-
-A token here is a kind plus a span: what it is, and where it came from.
-
-### Literals carry their decoded value
-
-`TokenKind` has a variant per kind of token, and the ones that carry data carry it already decoded:
+#### DiagnosticBag (`src/diagnostics.rs`)
 
 ```rust
-IntLit(i32),        // 0xff arrives as 255
-CharLit(u8),        // '\n' arrives as the byte 10
-StrLit(Vec<u8>),    // "a\tb" arrives as three bytes, with a real tab in the middle
+pub struct DiagnosticBag {
+    diagnostics: Vec<Diagnostic>,
+}
 ```
 
-That is a decision, not an accident. The alternative is to store the raw source text on the token
-and let a later stage work out what `0xff` and `\t` mean. Doing it once, here, in the one place that
-already has the source text in hand, removes an entire category of bug where two stages disagree
-about what an escape sequence means. By the time the code generator emits a string, it emits stored
-bytes; it never re-reads a backslash.
+A stage pushes each problem into a `DiagnosticBag` and continues, so a file with four mistakes
+produces four diagnostics. `into_sorted` returns them in source order, because a stage does not
+necessarily find problems in the order they occur — a later stage may resolve a reference and only
+then find an error on an earlier line. The sort is stable: two diagnostics at the same position keep
+the order in which they were found.
 
-### The two tables that cannot drift apart
+### Tokens
 
-There are two places where the same knowledge is needed in both directions, and both are written
-once.
+A token is the smallest meaningful unit of a program. `int x = 5;` consists of five tokens:
 
-The keyword table needs to answer "is this word a keyword?" when scanning, and "how is this keyword
-spelled?" when printing an error. Writing those as two lists guarantees that one day someone adds a
-keyword to one and not the other. Instead there is a small macro — a piece of Rust that generates
-code at compile time — which takes one list of keyword-and-spelling pairs and produces both
-directions from it. Adding a keyword is one line.
+- The keyword `int`.
+- The identifier `x`.
+- The operator `=`.
+- The integer literal `5`.
+- The punctuator `;`.
 
-The escape table is the same problem. The lexer reads it left to right to turn `\n` into a newline
-byte; the printer reads it right to left to turn a newline byte back into `\n` when quoting a
-literal in an error message. One table, read both ways, so they cannot disagree about what `\v` is.
-A test walks every entry and checks the round trip.
+The lexer produces these tokens without interpreting them; it does not know the sequence is a
+declaration.
 
-### A test that catches a missing case at compile time
+#### Token (`src/lexer/token.rs`)
 
-There is a nice trick in this file worth calling out, because it is a pattern Rust makes possible
-and the project reuses later.
+```rust
+pub struct Token {
+    pub kind: TokenKind, // what the token is
+    pub span: Span,      // where it came from
+}
+```
 
-A test needs a sample of every kind of token, to check they all have a printable spelling. The
-danger is that someone adds a new token kind and forgets to add it to the sample list, so it goes
-untested. The test defends against that by looping over the samples and matching each one against an
-exhaustive list of every variant. Rust requires a match to cover every possibility, so adding a
-variant without adding a sample stops the code from compiling. The test does not fail — the build
-fails, immediately, at the place the mistake was made.
+The vocabulary covers the entire grammar, not only what the scanner recognized when it was written,
+because the token set is the contract between the lexer and the parser.
 
-## Part three: the scanner
+#### TokenKind (`src/lexer/token.rs`)
 
-The file is `src/lexer/mod.rs`. This is the code that reads characters and produces tokens.
+```rust
+pub enum TokenKind {
+    Keyword(Keyword),   // int, char, void, if, else, while, for, return, break, continue
+    Ident(String),      // a name that is not a keyword
+    IntLit(i32),        // 0xff arrives as 255
+    CharLit(u8),        // '\n' arrives as the byte 10
+    StrLit(Vec<u8>),    // "a\tb" arrives as three bytes, with a real tab
+    Plus, PlusPlus, LtEq, AmpAmp, /* … every operator and punctuator … */
+    Eof,                // the end of the stream
+}
+```
 
-### It reads bytes, not text
+The variants that carry data store it already decoded: the lexer resolves numeric bases and escape
+sequences once, in the only stage that reads the source text. No later stage re-interprets a
+backslash, which rules out two stages disagreeing about what an escape means.
 
-Rust's normal string type guarantees its contents are valid UTF-8 — the standard way of encoding
-text. The scanner deliberately does not use it. It reads a raw slice of bytes.
+> A token is one of several alternatives, and only some alternatives carry a value. Rust's `enum`
+> models exactly that shape:
+>
+> - Each variant can carry its own data, of its own type: `IntLit(i32)`, `StrLit(Vec<u8>)`, or nothing
+>   at all for `Plus`.
+> - The value inside a variant can only be read by first matching on which variant it is, so code can
+>   never read a string's bytes out of a token that is actually an integer.
+> - Without this, a token is a kind tag plus a general-purpose field, and every stage must remember
+>   which tags make that field meaningful.
 
-Two reasons. A C file is not guaranteed to be valid UTF-8; a stray byte from a corrupted paste is
-perfectly possible. And this stage will later be handed deliberately random input by a fuzzer, a
-tool that hunts for crashes by feeding a program arbitrary garbage. If the scanner used the
-text type, a file with an invalid byte would fail to load before the compiler even started, and the
-user would get a message about encoding rather than a message about their program. Reading bytes
-means a malformed byte becomes an ordinary diagnostic pointing at the offending character.
+The cost is that `Token` owns heap-allocated data (`String`, `Vec<u8>`), so it cannot be `Copy` —
+duplicated implicitly, like an integer — and must be duplicated with an explicit `clone()`. The type's
+documentation records this trade-off.
 
-### Two properties that hold for every input
+#### Reading and Writing (`src/lexer/token.rs`)
 
-These are stated in the module's own documentation, and they are the reason the scanner can be
-trusted with garbage.
+Two pieces of knowledge are needed in both directions: reading source text into a token, and
+writing a token back out as source text for an error message. Each is defined once so that the two
+directions cannot disagree.
 
-It terminates. Every step of the scan consumes at least one byte, so the position only ever
-increases. There is no input on which the loop can spin in place forever. This is not a hope; it is
-a consequence of the structure, because the first byte of a token is consumed before anything
-decides what kind of token it is.
+- Keywords are declared once, in the `keywords!` macro, which provides the `Keyword` enum,
+  `Keyword::from_identifier` (text to keyword), and `Keyword::spelling` (keyword to text).
+- Escape sequences live in one table, `ESCAPES`, of eleven `(letter, byte)` pairs. The lexer reads it
+  left to right to decode `\n` into byte 10, and the display code reads it right to left to write
+  byte 10 back as `\n`. A test checks the round trip for every entry.
 
-It reaches the end. A malformed construct produces a diagnostic and then resynchronizes — picks a
-defensible place to resume — rather than stopping the scan. The token stream always ends with an
-end-of-file marker, even after an error. This matters more than it looks: a lexer that gave up at
-the first mistake would make the parser's own error recovery impossible to test, because the parser
-would never see any tokens past that point.
+Every `TokenKind` has a display spelling. That is what allows a later diagnostic to read
+`expected ';', found '}'` in the programmer's own notation.
 
-Where it resumes is chosen per construct. An unterminated string resumes at the end of that line,
-because a missing closing quote is far more likely than someone intending a string to span lines. An
-unterminated block comment resumes at end of file, because there is nowhere else plausible and
-guessing would silently turn the rest of the program into comment text.
+> Without code generation, the keyword enum, the lookup from text, and the spelling function are
+> three lists maintained by hand, and the first keyword added to one but not the others is a bug.
+> A declarative macro (`macro_rules!`) is Rust code that writes code at compile time:
+>
+> - `keywords!` takes a single list of `Variant => "spelling"` pairs.
+> - It expands into the enum, a `Keyword::ALL` constant, and the two `match` functions.
+> - Adding a keyword is one line, and the directions cannot disagree because both are generated
+>   from that line.
 
-### Maximal munch
+#### Token Testing (`src/lexer/token.rs`)
 
-When the scanner sees `<`, it has to decide whether that is a less-than operator or the start of
-`<=`. The rule, which has a name, is maximal munch: at each position take the longest thing that
-forms a valid token.
+The test module has to prove that every token kind has a spelling, including kinds added later.
+A plain list of sample tokens cannot prove this, because a new variant could be left out of the
+list and go untested without any failure.
 
-So `<=` is one token, never two. And a run like `a+++b` splits as `a`, `++`, `+`, `b` — at the
-second character the longest match is `++`, then at the fourth the longest match is `+`. That
-example is in the tests because the wrong split also produces three tokens, so counting them proves
-nothing; you have to look at what they are.
+The sample function therefore matches each sample against every variant of `TokenKind`, and
+`TokenKind::fixed_spelling` is written the same way. A second test asserts that no two samples are
+the same variant, so the list cannot satisfy the first test by repeating an entry.
 
-### Keywords are recognized after the fact
+> A Rust `match` over an enum must handle every variant; the compiler rejects one that does not.
+> Both the sample function and `fixed_spelling` rely on this:
+>
+> - Adding a `TokenKind` variant without a sample stops the test suite from compiling, at the
+>   exact line where the case is missing.
+> - Adding one without a spelling stops the compiler itself from building, so a token with no
+>   spelling can never reach an error message as blank text.
 
-A tempting way to find keywords is to check whether the input starts with `int`. That is wrong:
-`integer` starts with `int`, and would lex as the keyword `int` followed by an identifier `eger`.
+### Scanner
 
-Instead the scanner reads the entire word first — every letter, digit, and underscore in a row — and
-only then asks whether the finished word happens to spell a keyword. `integer` is read whole, looked
-up, not found, and becomes one identifier. The bug cannot occur.
+The scanner is the lexer's implementation: the loop that reads bytes and emits tokens.
 
-### Numbers are consumed whole before being judged
+#### Interface (`src/lexer/mod.rs`)
 
-C writes integers in three bases: plain decimal, hexadecimal with an `0x` prefix, and octal with a
-leading `0`. So `010` is eight, not ten, which surprises people but is genuinely what C means.
+```rust
+pub struct Lexed {
+    pub tokens: Vec<Token>,           // always ends in Eof
+    pub diagnostics: Vec<Diagnostic>, // in source order
+}
 
-The interesting decision is about bad input. Given `0xZZ`, the naive approach reads `0x`, finds no
-valid digits, reports, and stops — leaving `ZZ` to be scanned as an identifier. The user then gets a
-confusing error followed by a phantom variable name. So the scanner consumes the whole alphanumeric
-run first, and only then validates it. One diagnostic, covering the whole thing, pointing at all of
-`0xZZ`.
+pub fn lex(source: &[u8]) -> Lexed;
+pub fn dump(map: &SourceMap, tokens: &[Token]) -> String;
+```
 
-Overflow gets similar care. Accumulating digits into a number that is already too large could wrap
-around back into a valid-looking range, so the accumulation saturates — it sticks at the maximum
-instead of wrapping. And when reporting, the message quotes the literal's own source text rather
-than the accumulated number, because saturation means the accumulated number would be some unrelated
-round figure that appears nowhere in the user's file.
+#### Principles (`src/lexer/mod.rs`)
 
-### The token dump
+The scanner reads `&[u8]`, a slice of raw bytes, rather than text:
 
-`rustycc program.c --dump-tokens` prints the token stream, one per line, each with the source
-positions it came from. It exists so the stage can be inspected on its own.
+1. A C file is not guaranteed to be valid UTF-8; a single corrupted byte is enough to break that
+   guarantee.
+2. The lexer is a planned fuzzing target. A fuzzer searches for crashes by generating arbitrary
+   input, most of which is not valid text.
+3. Converting to text first would turn a malformed byte into a failure before compilation starts.
+   Reading bytes turns it into an ordinary diagnostic that points at the byte.
 
-The kinds are printed in their internal debugging form rather than as source text, which is
-deliberate: the point of the dump is to show what the scanner decided. Seeing `IntLit(255)` where
-the source said `0xff` tells you the base was decoded. Seeing one `PlusPlus` rather than two `Plus`
-tells you maximal munch worked.
+Two properties hold for every input, as the module documentation states:
 
-One small thing that is easy to get wrong: the position column's width is measured from the data
-rather than fixed. A fixed width wide enough for `9:9-9:12` stops lining up the moment a file
-reaches four-digit line numbers — which is exactly the size of file where a dump is long enough that
-alignment is what makes it readable.
+1. It terminates. Each step consumes at least one byte before deciding what it has scanned, so the
+   offset only increases and no input can make the loop repeat in place. This follows from the
+   structure of the code: `scan` receives its first byte already consumed.
+2. It reaches the end. A malformed construct produces a diagnostic and the scanner resynchronizes,
+   meaning it resumes at a defined point instead of stopping. The token stream always ends in `Eof`.
+   This is what makes the parser's error recovery testable, since the parser still receives the
+   tokens after a lexical error.
 
-## Part four: the runtime shim
+Resynchronization points are chosen per construct:
 
-A compiled program that cannot print anything is close to untestable. Comparing two compilers'
-output requires there to be output; without it there is only a single numeric exit code, which is
-one integer per program.
+- An unterminated string or character literal resumes at the end of its line, since a missing
+  closing quote is far more likely than a literal meant to span lines.
+- An unterminated block comment consumes the rest of the file. No other resumption point is
+  defensible, and closing the comment early would silently turn comment text into code.
 
-The obvious answer is C's `printf`. It is a poor fit here for two independent reasons, recorded as
-[ADR 0006](../decisions/0006-fixed-arity-runtime-shim.md).
+#### Maximal Munch (`src/lexer/mod.rs`)
 
-`printf` takes a variable number of arguments, and passing a variable number of arguments on ARM64
-follows its own separate set of rules from passing a fixed number. Supporting that correctly is a
-whole implementation effort of its own, spent entirely on making output prettier rather than on
-testing the compiler better. And `printf` buffers its output, so two binaries could flush at
-different moments and produce a difference in behaviour that has nothing to do with either compiler
-being wrong.
+At each position the scanner takes the longest sequence of characters that forms a valid token.
+This rule is called maximal munch.
 
-So the project ships three tiny functions instead, each taking exactly one argument: `print_int`,
-`print_char`, and `print_string`. They are written in ordinary C — `runtime/shim.c` is compiled by
-`clang`, not by this compiler, so it is free to use the preprocessor and system headers the subset
-excludes — and they write directly to the output using the lowest-level system call available.
+- `<=` is always one token, never `<` followed by `=`.
+- `a+++b` scans as `a`, `++`, `+`, `b`: at the second character the longest match is `++`, and at
+  the fourth it is `+`.
 
-Three details in that file are more interesting than the size suggests:
+The tests assert the exact token sequence for `a<=b`, `a<-b`, `a++ +b`, and `a+++b`. Counting tokens
+would prove nothing here, because the incorrect split of `a+++b` also produces four tokens.
 
-1.  Writing is retried. The system call that writes bytes is permitted to write fewer than asked,
-    and to fail partway through if a signal arrives. A single call is not enough, so there is a loop
-    that keeps going until everything is written.
-2.  `print_int` computes digits in unsigned arithmetic. The natural way to print a negative number
-    is to negate it and print a minus sign — but negating the most negative possible `int` overflows,
-    which C says is undefined behaviour, meaning the compiler may do anything at all. So the
-    magnitude is computed with unsigned arithmetic, which is defined to wrap, and for that one value
-    yields exactly the right answer. A naive implementation prints something wrong here rather than
-    crashing, which is worse.
-3.  The digit loop runs at least once, so that zero prints as `0` rather than as nothing.
+#### Keywords (`src/lexer/mod.rs`)
 
-It is compiled once, by the build script, and the identical object file is linked into both sides of
-every comparison. There is deliberately no second implementation that could itself be wrong.
+Checking whether the input starts with `int` would scan `integer` as the keyword `int` followed by
+an identifier `eger`. The scanner avoids this by reading the complete word first — every letter,
+digit, and underscore in sequence — and only then calling `Keyword::from_identifier` on the finished
+word. `integer` is not in the table, so it becomes a single identifier.
 
-## Part five: the scaffolding that makes the rest possible
+#### Numbers (`src/lexer/mod.rs`)
 
-Several decisions in this phase are not about compiling anything. They are about making the next
-four phases possible to work on.
+C writes integers in three bases: decimal, hexadecimal with a `0x` prefix, and octal with a leading
+`0`. Two rules govern malformed and oversized literals:
 
-The compiler is a library with a thin command-line program wrapped around it. `src/lib.rs` holds a
-`compile` function that takes source bytes and returns either results or diagnostics, touching no
-files and starting no processes. `src/main.rs` is barely twenty lines: read arguments, call the
-library, turn the result into an exit code. The reason is testing — tests can drive the whole
-compiler directly, in the same process, rather than starting a program and reading its output back
-as text. Everything about that is faster and gives better failure messages.
+1. The whole literal is consumed before it is validated. The scanner reads the entire run of
+   letters and digits, so `0xZZ` and `123abc` each produce one diagnostic covering the whole
+   literal, not an error followed by an unrelated identifier.
+2. Overflow is a diagnostic, not a wrap. Literals are accepted up to `i32::MAX`, 2147483647.
+   Accumulation saturates, so a very long literal cannot wrap back into the valid range partway
+   through. The minimum `int` is written `-2147483647 - 1`, which is also how `limits.h` defines
+   `INT_MIN`.
 
-The command line already has flags for stages that do not exist yet: `--dump-tokens`, `--dump-ast`,
-`--check`, `-S`. They are declared as a mutually exclusive group, so asking to stop in two places at
-once is caught as a usage error. Fixing the shape of the interface early means later phases fill
-things in rather than redesigning.
+#### Token Dump (`src/lexer/mod.rs`)
 
-The lint configuration is worth mentioning because it enforces an architectural rule mechanically. A
-central invariant of this project is that no stage crashes on user input — every problem becomes a
-reported diagnostic. Rust has several operations that crash when things go wrong: `unwrap`,
-`expect`, an explicit `panic`, and indexing a list with a position that might be out of range. All
-four are configured as build failures inside the compiler's own source. They are permitted in tests,
-where a crash is simply a failing test, which is the point. So the invariant is enforced by the
-build rather than by someone noticing in review.
+`rustycc program.c --dump-tokens` prints the stream one token per line, each preceded by its source
+range. For `int x = 0xff;`:
 
-Similarly, every module, type, function, and test is required to carry a documentation comment, and
-a missing one is a build failure rather than a review comment.
+```
+1:1-1:4    Keyword(Int)
+1:5-1:6    Ident("x")
+1:7-1:8    Assign
+1:9-1:13   IntLit(255)
+1:13-1:14  Semi
+2:1-2:1    Eof
+```
 
-The toolchain version is pinned exactly, rather than set to "latest stable". Otherwise a new Rust
-release turns up first as an unexplained red build on a change that had nothing to do with it.
+Kinds are printed in Rust's debug format (`Debug`), not as source text, because the dump exists to
+show what the scanner decided: `IntLit(255)` for `0xff` shows that the base was decoded. The two
+byte-valued literals are shown re-escaped, as `CharLit('\n')`, instead of as raw numbers. As
+[Learnings](#learnings) describes, the width of the position column is measured from the data.
 
-Continuous integration runs on an Apple Silicon machine, because the target of this compiler is
-Apple Silicon and the tests eventually run the code it produces. Before anything else, a preflight
-step checks that the C toolchain resolves, so a missing Xcode installation becomes one clear failure
-rather than a confusing linker error buried inside another job.
+### Runtime Shim
 
-## What this leaves in place
+A compiled program with no output can be compared only by its exit code, a single integer. Useful
+differential testing needs printed output. C's `printf` is unsuitable for two independent reasons,
+recorded in [ADR 0006](../decisions/0006-fixed-arity-runtime-shim.md):
 
-The pieces Phase 1 puts down are all consumed by what comes after, which is why the order matters.
+1. `printf` is variadic — it accepts a variable number of arguments. On ARM64, variadic arguments
+   are passed under different rules from fixed arguments, and supporting them would be significant
+   work spent on output rather than on the compiler.
+2. `printf` buffers its output, so two binaries could write at different moments and differ for
+   reasons unrelated to either compiler.
 
-`Span` and `Diagnostic` are how every later stage reports. The parser's error messages, the semantic
-analyzer's type errors, and the code generator's internal limits all render through the same caret
-machinery, which is what makes the compiler's output look like one program rather than four.
+#### Output Functions (`runtime/shim.c`)
 
-The token stream is the parser's input, and the token vocabulary was written to cover the whole
-grammar rather than only what the scanner happened to recognize at the time — including a printable
-spelling for every token, which is what lets the parser eventually say `expected ';', found '}'` in
-the user's own notation.
+The shim instead defines three functions, each with exactly one argument:
 
-The two properties the scanner holds to — terminates, always reaches the end — are the same two the
-parser is held to in
-[Phase 2](Phase-2-Explanation.md), and eventually the whole front end under fuzzing.
+```c
+void print_int(int n);
+void print_char(char c);
+void print_string(char *s);
+```
 
-And the shim is the reason there is anything to compare at all when differential testing begins.
+The file is compiled by `clang`, not by `rustycc`, so it may use the headers and preprocessor the
+subset excludes. The [architecture](../architecture.md#the-runtime-shim) describes its role in the
+pipeline. Three details guard against specific failures:
+
+1. Writes are retried. The `write` system call may write fewer bytes than requested, or be
+   interrupted by a signal (`EINTR`), so `write_all` loops until every byte is written.
+2. `print_int` computes digits in unsigned arithmetic. Negating the most negative `int` overflows,
+   which C defines as undefined behaviour — the compiler may then produce anything. The magnitude is
+   computed as `0u - (unsigned int)n`, which wraps by definition and yields exactly 2147483648 for
+   `INT_MIN`.
+3. The digit loop is a `do`/`while`, so zero prints as `0` rather than as nothing.
+
+#### Build Script (`build.rs`, `src/runtime.rs`)
+
+A Cargo build script is a Rust program Cargo runs before compiling the crate. This one invokes
+`clang -Werror` once to produce `shim.o`, and exports that object's path as the environment variable
+`RUSTYCC_SHIM_OBJECT`. The crate exposes the path as a constant:
+
+```rust
+pub const SHIM_OBJECT: &str = env!("RUSTYCC_SHIM_OBJECT");
+```
+
+There is one object per build, so both sides of every differential comparison link the identical
+runtime. `clang` is also the project's assembler and linker, as
+[ADR 0009](../decisions/0009-clang-as-assembler-and-linker.md) records.
+
+> The compiler depends on a C file that only `clang` can build, and a path to it that must be
+> correct everywhere the runtime is linked. Cargo and the `env!` macro make that part of the build:
+>
+> - `build.rs` declares `cargo::rerun-if-changed=runtime/shim.c`, so editing the shim rebuilds it
+>   on the next `cargo build` with no separate step.
+> - `env!` reads an environment variable when the crate compiles, not when it runs. If the build
+>   script did not produce the object, `rustycc` fails to compile rather than failing later at
+>   link time.
+
+### Scaffolding
+
+The remaining decisions in Phase 1 compile nothing. They define the structure each later phase
+works inside.
+
+#### Library and Binary (`src/lib.rs`, `src/main.rs`)
+
+```rust
+pub fn compile(source: &[u8], path: &Path, options: &Options)
+    -> Result<Artifacts, Vec<Diagnostic>>;
+pub fn run(options: &Options) -> Result<(), Error>;
+```
+
+The compiler is a library with a thin binary around it:
+
+- `compile` takes source bytes and returns either artifacts or diagnostics. It reads no files and
+  starts no processes.
+- `run` adds the input and output around `compile`: reading the file and printing the results.
+- The binary's `main` is 23 lines: parse the arguments, call `run`, and convert the result into an
+  exit code.
+
+Tests therefore drive the full compiler in-process, which is faster than launching the binary
+and gives structured results instead of captured text.
+
+Rust's `Result<T, E>` expresses success or failure in the return type. It holds either a value or an
+error, and the caller must handle both. `compile` returns every diagnostic found, not only the first.
+
+#### Command Line (`src/cli.rs`)
+
+```rust
+pub enum Stage { Tokens, Ast, Check, Assembly, Executable }
+```
+
+The interface is `rustycc program.c -o program`. It is parsed by `clap` (a command-line parsing
+library) from annotations on the `Options` struct. Four flags each stop the pipeline at a stage:
+
+- `--dump-tokens`: after the lexer, printing the token stream.
+- `--dump-ast`: after the parser, printing the syntax tree.
+- `--check`: after semantic analysis, emitting nothing.
+- `-S`: after code generation, leaving assembly instead of an executable.
+
+The flags form one mutually exclusive group, so requesting two stopping points is a usage error.
+The full set was declared in Phase 1 so that later
+phases implement stages behind a fixed interface.
+
+#### Lint Gates (`Cargo.toml`, `clippy.toml`, `src/lib.rs`)
+
+One of the [pipeline invariants](../architecture.md#the-pipeline) is that no stage panics on user
+input: every problem must become a diagnostic. Four `clippy` lints (`clippy` is Rust's official linter) enforce it at build time:
+
+```toml
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+```
+
+The clippy configuration permits these operations in tests, where a crash is simply a failing test.
+
+> A compiler has to turn every problem in its input into a diagnostic. In Rust, the operations that
+> stop the program on unexpected input are a short, identifiable list, and each has a safe
+> counterpart whose result the compiler forces the caller to handle:
+>
+> - `unwrap` and `expect` stop on a missing value; matching the `Option` or `Result` handles it.
+> - `panic!` stops explicitly; returning an error value reports it instead.
+> - `slice[i]` stops when `i` is out of range; `slice.get(i)` returns `None`, so reading past the
+>   end of a file must say what happens there.
+>
+> Because the list is short, the linter can forbid all of it, and the invariant is checked by
+> `cargo clippy` on every build rather than by review.
+
+The crate also declares `#![deny(missing_docs)]`, so a module, type, or function without a
+documentation comment fails the build.
+
+#### Toolchain (`rust-toolchain.toml`)
+
+The toolchain file pins Rust to exactly 1.97.1 rather than to the latest stable release. Local
+builds and CI therefore use the same compiler and the same lints, and a new Rust release cannot
+cause a failure on an unrelated change. Nightly Rust is used only for fuzzing, invoked explicitly as
+`cargo +nightly`. [ADR 0002](../decisions/0002-rust-as-implementation-language.md) records why the
+compiler is written in Rust.
+
+#### Continuous Integration (`.github/workflows/ci.yml`)
+
+The workflow runs on `macos-14`, an Apple Silicon runner, because the compiler targets
+ARM64 macOS only ([ADR 0003](../decisions/0003-single-target-arm64-macos.md)) and later phases run
+the code it generates. The workflow is split into separate jobs so that a failure identifies the
+gate that failed:
+
+1. Toolchain preflight: asserts that `clang --version` and `xcrun --show-sdk-path` succeed, so a
+   missing Xcode installation produces one clear failure instead of a linker error inside another job.
+2. `cargo fmt`: formatting.
+3. `cargo clippy`: the lint gates, run after the preflight.
+4. `cargo test`: the test suite, run after the preflight.
+5. `docs`: builds the documentation site and API reference with the same script contributors run
+   locally, failing on a broken link or a page missing from the navigation.
+
+## Learnings
+
+Two problems surfaced while building this phase, both in how the scanner turns what it has read
+into output. Each one changed the code and gained a test.
+
+1. The token dump's alignment broke on large files. The position column had a fixed width of 16
+   characters, which stopped aligning at four-digit line numbers — the file size at which alignment
+   matters most. The width is now measured from the widest position in the stream, and a test with
+   five-digit line numbers pins that behaviour.
+2. An oversized integer literal was quoted incorrectly. The value accumulator saturates (stops at
+   its maximum instead of wrapping) so that a long literal cannot wrap back into a valid range, but
+   the error message then quoted the saturated number, which never appeared in the source. Writing
+   the error-path tests exposed this. The message now quotes the literal's own source text and adds
+   a note with the limit.
+
+## Try It Out
+
+Run these from the repository root, with Rust and the Xcode Command Line Tools installed.
+
+1. Build the compiler:
+
+    ```bash
+    cargo build
+    ```
+
+2. Write a small program and print the tokens the lexer produces:
+
+    ```bash
+    cat > /tmp/hello.c <<'EOF'
+    int main(void) {
+        int total = 0x10 + 010;
+        return total;
+    }
+    EOF
+    ./target/debug/rustycc /tmp/hello.c --dump-tokens
+    ```
+
+    One token per line with its source position, ending in `Eof`. `0x10` appears decoded as
+    `IntLit(16)` and the octal `010` as `IntLit(8)`.
+
+3. Introduce mistakes and read the diagnostics:
+
+    ```bash
+    cat > /tmp/broken.c <<'EOF'
+    int main(void) {
+        int big = 2147483648;
+        int a = 0xZZ;
+        char c = '';
+        return a @ c;
+    }
+    EOF
+    ./target/debug/rustycc /tmp/broken.c --dump-tokens
+    ```
+
+    Four errors in source order, each with a caret line under the offending text, and a note on the
+    oversized literal giving the limit.
+
+4. Run the runtime shim's tests:
+
+    ```bash
+    cargo test --test runtime_shim
+    ```
+
+    Six passing tests that compile C programs against the shim and check what they print.
+
+The [Cheatsheet](../CHEATSHEET.md) has more commands for exercising the lexer by hand.
+
+## What's Next?
+
+Phase 1 produces a flat sequence of tokens. [Phase 2](Phase-2-Explanation.md) builds the parser,
+which turns that sequence into a tree recording which constructs contain which: the abstract syntax
+tree. It builds on each component above:
+
+- The parser reports through `Diagnostic` and `DiagnosticBag`, and adds a `Parse` constructor and
+  notes for unsupported C features.
+- It consumes the token stream, and uses each `TokenKind`'s spelling in messages such as
+  `expected ';', found '}'`.
+- It holds the scanner's two properties — terminate, and continue past errors to the end — and adds
+  a third: a limit on how deeply the tree may nest.
+- It implements `--dump-ast`, the second stage flag declared in Phase 1.
