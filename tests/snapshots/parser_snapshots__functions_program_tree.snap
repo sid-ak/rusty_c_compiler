@@ -264,9 +264,10 @@ expression: "dump(&Path::new(CORPUS).join(\"functions.c\"))"
           (ident print_int)
           (args
             (ident global_counter))))
-      (local-var int n
-        (init
-          (int-lit 0)))
+      (decl-stmt
+        (local-var int n
+          (init
+            (int-lit 0))))
       (expr-stmt
         (call
           (ident print_int)

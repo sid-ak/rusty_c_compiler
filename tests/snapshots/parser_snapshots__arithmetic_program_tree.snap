@@ -12,12 +12,14 @@ expression: "dump(&Path::new(CORPUS).join(\"arithmetic.c\"))"
   (func-def int main
     (params)
     (block
-      (local-var int a
-        (init
-          (int-lit 17)))
-      (local-var int b
-        (init
-          (int-lit 5)))
+      (decl-stmt
+        (local-var int a
+          (init
+            (int-lit 17))))
+      (decl-stmt
+        (local-var int b
+          (init
+            (int-lit 5))))
       (expr-stmt
         (call
           (ident print_int)
@@ -183,9 +185,10 @@ expression: "dump(&Path::new(CORPUS).join(\"arithmetic.c\"))"
                 (binary -
                   (ident b)
                   (int-lit 5)))))))
-      (local-var int n
-        (init
-          (int-lit 0)))
+      (decl-stmt
+        (local-var int n
+          (init
+            (int-lit 0))))
       (expr-stmt
         (assign
           (ident n)
@@ -221,12 +224,14 @@ expression: "dump(&Path::new(CORPUS).join(\"arithmetic.c\"))"
           (args
             (unary --
               (ident n)))))
-      (local-var int x
-        (init
-          (int-lit 0)))
-      (local-var int y
-        (init
-          (int-lit 0)))
+      (decl-stmt
+        (local-var int x
+          (init
+            (int-lit 0))))
+      (decl-stmt
+        (local-var int y
+          (init
+            (int-lit 0))))
       (expr-stmt
         (assign
           (ident x)
@@ -243,9 +248,10 @@ expression: "dump(&Path::new(CORPUS).join(\"arithmetic.c\"))"
           (ident print_int)
           (args
             (ident y))))
-      (local-var char c
-        (init
-          (char-lit 'A')))
+      (decl-stmt
+        (local-var char c
+          (init
+            (char-lit 'A'))))
       (expr-stmt
         (call
           (ident print_int)

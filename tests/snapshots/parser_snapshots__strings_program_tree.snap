@@ -16,9 +16,10 @@ expression: "dump(&Path::new(CORPUS).join(\"strings.c\"))"
     (params
       (param char[] s))
     (block
-      (local-var int n
-        (init
-          (int-lit 0)))
+      (decl-stmt
+        (local-var int n
+          (init
+            (int-lit 0))))
       (while
         (binary !=
           (index
@@ -121,9 +122,10 @@ expression: "dump(&Path::new(CORPUS).join(\"strings.c\"))"
             (binary >
               (char-lit 'z')
               (char-lit 'a')))))
-      (local-var char[6] greeting
-        (init
-          (str-lit "hello")))
+      (decl-stmt
+        (local-var char[6] greeting
+          (init
+            (str-lit "hello"))))
       (expr-stmt
         (call
           (ident print_string)
@@ -172,9 +174,10 @@ expression: "dump(&Path::new(CORPUS).join(\"strings.c\"))"
               (ident length)
               (args
                 (str-lit ""))))))
-      (local-var char[4] word
-        (init
-          (str-lit "abc")))
+      (decl-stmt
+        (local-var char[4] word
+          (init
+            (str-lit "abc"))))
       (for
         (init
           (local-var int i

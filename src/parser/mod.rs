@@ -877,19 +877,27 @@ mod tests {
              return total;
          }";
 
-    /// Every node the parser builds gets an identity no other node has. Phase 3 keys its
-    /// annotations by these, so a collision would silently give two nodes the same type.
+    /// Every node the parser builds gets an identity no other node has, and `ast::nodes` lists
+    /// every one of them. Phase 3 keys its annotations by these ids, so a collision would give two
+    /// nodes the same type and an omission would leave a node with none.
+    ///
+    /// Uniqueness alone cannot see an omission — dropping a node never makes two ids collide. Ids
+    /// are handed out 0, 1, 2, … and a clean parse keeps every node it allocates one for, so the
+    /// listed ids must be exactly `0..n` with no gap, which checks both properties at once against
+    /// a count the dump walk does not produce itself.
     #[test]
-    fn the_parser_gives_every_node_a_distinct_id() {
+    fn the_parser_lists_every_node_it_built_exactly_once() {
         let lexed = lexer::lex(BROAD.as_bytes());
         let parsed = parse(&lexed.tokens);
         assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
 
         let nodes = ast::nodes(&parsed.program);
-        let distinct: std::collections::HashSet<_> = nodes.iter().map(|(id, _)| *id).collect();
+        let mut ids: Vec<u32> = nodes.iter().map(|(id, _)| id.index()).collect();
+        ids.sort_unstable();
+        let expected: Vec<u32> = (0..).take(ids.len()).collect();
 
-        assert!(nodes.len() > 40, "expected a program worth walking");
-        assert_eq!(distinct.len(), nodes.len(), "ids repeat: {nodes:?}");
+        assert!(ids.len() > 40, "expected a program worth walking");
+        assert_eq!(ids, expected, "ids repeat or are missing from: {nodes:?}");
     }
 
     /// Every span the parser records is a real range inside the file it came from.
@@ -1006,7 +1014,7 @@ mod tests {
             ("{ { } }", "(block (block))"),
             (";", "(empty)"),
             ("x;", "(expr-stmt (ident x))"),
-            ("int y;", "(local-var int y)"),
+            ("int y;", "(decl-stmt (local-var int y))"),
             ("return;", "(return)"),
             ("return 1;", "(return (int-lit 1))"),
             ("break;", "(break)"),

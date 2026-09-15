@@ -833,7 +833,11 @@ fn stmt_tree(stmt: &Stmt) -> DumpNode {
         StmtKind::Break => ("break", Vec::new()),
         StmtKind::Continue => ("continue", Vec::new()),
         StmtKind::Expr(expr) => ("expr-stmt", vec![expr_tree(expr)]),
-        StmtKind::LocalVar(decl) => return var_tree("local-var", decl),
+        // The statement and the declaration it holds are two nodes with two identities — the
+        // statement's span also takes in the `;` — so each gets its own line, the way `expr-stmt`
+        // wraps its expression. Standing the declaration in for the statement would drop the
+        // statement from `nodes`.
+        StmtKind::LocalVar(decl) => ("decl-stmt", vec![var_tree("local-var", decl)]),
         StmtKind::Empty => ("empty", Vec::new()),
     };
 
@@ -1111,7 +1115,8 @@ mod tests {
         assert_eq!(dump_expression(&expr, Spans::Hidden), "(int-lit 7)\n");
     }
 
-    /// Every statement and expression form has a line in the dump, and no two forms share one.
+    /// Every statement and expression form has a line of its own in the dump, carrying its own id
+    /// and span, and no two forms share one.
     ///
     /// The exhaustive matches in the dumper are the real guard — a variant added without a line
     /// fails to compile — and this checks the lines are also told apart from one another.
@@ -1164,11 +1169,11 @@ mod tests {
         let mut heads: Vec<String> = Vec::new();
         for kind in statements {
             let stmt = build.stmt(kind);
-            heads.push(first_line(&stmt_tree(&stmt)));
+            heads.push(own_line(stmt_tree(&stmt), stmt.id, stmt.span));
         }
         for kind in expressions {
             let expr = build.expr(kind);
-            heads.push(first_line(&expr_tree(&expr)));
+            heads.push(own_line(expr_tree(&expr), expr.id, expr.span));
         }
         for kind in [
             StmtKind::Block(Block {
@@ -1193,7 +1198,7 @@ mod tests {
             StmtKind::LocalVar(init),
         ] {
             let stmt = build.stmt(kind);
-            heads.push(first_line(&stmt_tree(&stmt)));
+            heads.push(own_line(stmt_tree(&stmt), stmt.id, stmt.span));
         }
 
         let distinct: HashSet<&String> = heads.iter().collect();
@@ -1204,9 +1209,19 @@ mod tests {
         );
     }
 
-    /// The head of a dumped node, without its children.
-    fn first_line(node: &DumpNode) -> String {
-        node.head.clone()
+    /// The head of a dumped node, after asserting the line stands for the node it was built from.
+    ///
+    /// The dump walk is also how [`nodes`] enumerates a program, so a form whose line carries a
+    /// child's identity instead of its own would silently drop the node from that enumeration.
+    fn own_line(line: DumpNode, id: NodeId, span: Span) -> String {
+        assert_eq!(
+            (line.id, line.span),
+            (Some(id), Some(span)),
+            "{} does not carry its own identity",
+            line.head
+        );
+
+        line.head
     }
 
     /// A literal dumps in the form it was written, escapes and all, through the same table the

@@ -15,9 +15,10 @@ expression: "dump(&Path::new(CORPUS).join(\"arrays.c\"))"
       (param int[] values)
       (param int count))
     (block
-      (local-var int total
-        (init
-          (int-lit 0)))
+      (decl-stmt
+        (local-var int total
+          (init
+            (int-lit 0))))
       (for
         (init
           (local-var int i
@@ -75,7 +76,8 @@ expression: "dump(&Path::new(CORPUS).join(\"arrays.c\"))"
   (func-def int main
     (params)
     (block
-      (local-var int[5] numbers)
+      (decl-stmt
+        (local-var int[5] numbers))
       (for
         (init
           (local-var int i
@@ -134,12 +136,13 @@ expression: "dump(&Path::new(CORPUS).join(\"arrays.c\"))"
               (args
                 (ident numbers)
                 (int-lit 5))))))
-      (local-var int[4] primes
-        (init-list
-          (int-lit 2)
-          (int-lit 3)
-          (int-lit 5)
-          (int-lit 7)))
+      (decl-stmt
+        (local-var int[4] primes
+          (init-list
+            (int-lit 2)
+            (int-lit 3)
+            (int-lit 5)
+            (int-lit 7))))
       (expr-stmt
         (call
           (ident print_int)
@@ -163,10 +166,11 @@ expression: "dump(&Path::new(CORPUS).join(\"arrays.c\"))"
               (args
                 (ident primes)
                 (int-lit 4))))))
-      (local-var int[3] partial
-        (init-list
-          (int-lit 1)
-          (int-lit 2)))
+      (decl-stmt
+        (local-var int[3] partial
+          (init-list
+            (int-lit 1)
+            (int-lit 2))))
       (expr-stmt
         (call
           (ident print_int)
@@ -178,9 +182,10 @@ expression: "dump(&Path::new(CORPUS).join(\"arrays.c\"))"
               (index
                 (ident partial)
                 (int-lit 1))))))
-      (local-var int index
-        (init
-          (int-lit 1)))
+      (decl-stmt
+        (local-var int index
+          (init
+            (int-lit 1))))
       (expr-stmt
         (call
           (ident print_int)
@@ -253,11 +258,12 @@ expression: "dump(&Path::new(CORPUS).join(\"arrays.c\"))"
               (args
                 (ident totals)
                 (int-lit 4))))))
-      (local-var char[3] letters
-        (init-list
-          (char-lit 'a')
-          (char-lit 'b')
-          (char-lit 'c')))
+      (decl-stmt
+        (local-var char[3] letters
+          (init-list
+            (char-lit 'a')
+            (char-lit 'b')
+            (char-lit 'c'))))
       (expr-stmt
         (call
           (ident print_char)

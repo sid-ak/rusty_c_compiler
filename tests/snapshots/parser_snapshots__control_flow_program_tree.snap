@@ -12,12 +12,14 @@ expression: "dump(&Path::new(CORPUS).join(\"control_flow.c\"))"
   (func-def int main
     (params)
     (block
-      (local-var int i
-        (init
-          (int-lit 0)))
-      (local-var int total
-        (init
-          (int-lit 0)))
+      (decl-stmt
+        (local-var int i
+          (init
+            (int-lit 0))))
+      (decl-stmt
+        (local-var int total
+          (init
+            (int-lit 0))))
       (if
         (binary ==
           (ident i)
@@ -141,9 +143,10 @@ expression: "dump(&Path::new(CORPUS).join(\"control_flow.c\"))"
               (ident print_int)
               (args
                 (ident j))))))
-      (local-var int k
-        (init
-          (int-lit 0)))
+      (decl-stmt
+        (local-var int k
+          (init
+            (int-lit 0))))
       (for
         (init)
         (cond
@@ -266,9 +269,10 @@ expression: "dump(&Path::new(CORPUS).join(\"control_flow.c\"))"
               (ident print_int)
               (args
                 (ident m))))))
-      (local-var int p
-        (init
-          (int-lit 0)))
+      (decl-stmt
+        (local-var int p
+          (init
+            (int-lit 0))))
       (while
         (binary <
           (ident p)
@@ -341,9 +345,10 @@ expression: "dump(&Path::new(CORPUS).join(\"control_flow.c\"))"
                         (int-lit 10))
                       (ident c)))))))))
       (block
-        (local-var int shadowed
-          (init
-            (int-lit 100)))
+        (decl-stmt
+          (local-var int shadowed
+            (init
+              (int-lit 100))))
         (block
           (expr-stmt
             (call
