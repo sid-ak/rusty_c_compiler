@@ -26,8 +26,10 @@
 //!
 //! Recursive descent recurses, and deeply nested input would otherwise run the call stack out —
 //! which is a crash, and a crash is the one thing the front end is not allowed to produce. Every
-//! recursive entry point goes through `Parser::nested`, which reports past
-//! [`MAX_NESTING_DEPTH`] instead of descending further.
+//! recursive entry point goes through `Parser::nested`, and every loop that makes the tree deeper
+//! without recursing — an operator chain, a postfix chain — charges a level per pass through
+//! `Parser::deepen`, so the tree itself never passes [`MAX_NESTING_DEPTH`] and neither does any
+//! later pass that walks it.
 
 pub mod expr;
 
@@ -41,19 +43,23 @@ use crate::diagnostics::{Diagnostic, DiagnosticBag, DiagnosticKind, Span};
 use crate::lexer::token;
 use crate::lexer::{Keyword, Token, TokenKind};
 
-/// How many levels of nesting the parser will descend before reporting instead of recursing.
+/// How many levels deep the parser will let the syntax tree grow before reporting instead.
 ///
-/// The limit counts parser descents rather than brackets: a parenthesized expression costs two,
-/// a nested block one. Real C reaches nothing close to it — the deepest expression anyone writes
-/// by hand is a handful of levels — so the limit is only ever met by generated or hostile input,
-/// which is exactly the case it exists to turn into a diagnostic.
+/// The limit counts levels of the tree the parser builds rather than brackets: a parenthesized
+/// expression costs two, a nested block one, and each operator in a chain like `1 + 1 + 1` or
+/// `a[0][0]` one. Counting the tree rather than only the parser's own recursion is what protects
+/// every pass that walks the tree afterwards — the dump, dropping it, and later analysis and code
+/// generation all recurse once per level. Real C reaches nothing close to it — the deepest
+/// expression anyone writes by hand is a handful of levels — so the limit is only ever met by
+/// generated or hostile input, which is exactly the case it exists to turn into a diagnostic.
 ///
-/// The number is a stack budget, not a taste in style, and it was measured rather than guessed. A
-/// level costs roughly 4 KB of stack in an unoptimized build, so 128 of them fit in well under a
-/// megabyte — comfortable inside the 2 MiB stack the test harness gives a thread, and far inside
-/// the 8 MiB the binary's main thread has. The `nesting_stays_within_a_small_stack` test holds that
-/// margin to a fixed figure by parsing on a deliberately undersized stack, so a change that makes a
-/// parse frame fatter fails there rather than as a crash on someone's input.
+/// The number is a stack budget, not a taste in style, and it was measured rather than guessed. In
+/// an unoptimized build the costliest shape, nested blocks, needs about 550 KB of stack to parse,
+/// dump, and drop at the limit, and nested parentheses about 400 KB — inside the 2 MiB stack the
+/// test harness gives a thread, and far inside the 8 MiB the binary's main thread has. The
+/// `deep_input_stays_within_a_small_stack` test holds that margin to a fixed 1 MiB figure for every
+/// shape, so a change that makes a frame fatter fails there rather than as a crash on someone's
+/// input.
 pub const MAX_NESTING_DEPTH: usize = 128;
 
 /// Everything one parse of a token stream produced.
@@ -90,7 +96,7 @@ struct Parser<'tokens> {
     tokens: &'tokens [Token],
     /// How many tokens have been consumed. Never decreases, which is half of why parsing ends.
     position: usize,
-    /// How many recursive descents are currently on the stack.
+    /// How many levels deep in the tree the construct being parsed sits.
     depth: usize,
     /// Hands out the identity of each node built.
     ids: NodeIds,
@@ -622,28 +628,50 @@ impl<'tokens> Parser<'tokens> {
 
     /// Run `parse` one nesting level deeper, reporting rather than recursing past the limit.
     fn nested<T>(&mut self, parse: fn(&mut Self) -> Result<T, Bail>) -> Result<T, Bail> {
-        self.depth += 1;
-        if self.depth > MAX_NESTING_DEPTH {
-            self.depth -= 1;
-            return Err(self.too_deep());
-        }
+        self.restoring_depth(|parser| {
+            parser.deepen()?;
+            parse(parser)
+        })
+    }
 
+    /// Run `parse`, then put the depth back to what it was before, however `parse` returned.
+    ///
+    /// Every level charged with [`Parser::deepen`] happens inside one of these, so no way out of a
+    /// construct — a finished parse, a `?` bail, an early error return — can leave its levels
+    /// charged to whatever the parser reads next.
+    fn restoring_depth<T>(
+        &mut self,
+        parse: impl FnOnce(&mut Self) -> Result<T, Bail>,
+    ) -> Result<T, Bail> {
+        let entry = self.depth;
         let parsed = parse(self);
-        self.depth -= 1;
+        self.depth = entry;
 
         parsed
     }
 
-    /// Report that the input nests deeper than the parser will follow.
+    /// Charge one level of tree depth, reporting instead once the tree would pass the limit.
+    ///
+    /// Recursion charges a level through [`Parser::nested`]. A loop that makes the tree deeper on
+    /// each pass without recursing — a left-associative operator chain, a postfix chain — calls this
+    /// directly once per pass, inside [`Parser::restoring_depth`].
+    fn deepen(&mut self) -> Result<(), Bail> {
+        self.depth += 1;
+        if self.depth > MAX_NESTING_DEPTH {
+            return Err(self.too_deep());
+        }
+
+        Ok(())
+    }
+
+    /// Report that the input nests deeper than the syntax tree is allowed to go.
     fn too_deep(&mut self) -> Bail {
         let span = self.here();
 
         self.report(
             Diagnostic::parse(
                 span,
-                format!(
-                    "nesting is too deep: the parser descends at most {MAX_NESTING_DEPTH} levels"
-                ),
+                format!("nesting is too deep: the syntax tree goes at most {MAX_NESTING_DEPTH} levels deep"),
             )
             .with_note("split the expression or the block into smaller pieces"),
         )
@@ -1307,89 +1335,164 @@ mod tests {
         assert_eq!(parsed.program.items.len(), 1, "main should still parse");
     }
 
-    /// Nesting past the limit is a diagnostic rather than a stack overflow.
-    #[test]
-    fn nesting_past_the_limit_is_reported() {
-        let depth = MAX_NESTING_DEPTH * 4;
-        let source = format!(
-            "int f(void) {{ return {}1{}; }}",
-            "(".repeat(depth),
-            ")".repeat(depth)
-        );
-
-        let messages = errors(&source);
-        assert!(
-            messages
-                .first()
-                .is_some_and(|message| message.starts_with("nesting is too deep")),
-            "got {messages:?}"
-        );
-    }
-
-    /// Deeply nested blocks are bounded by the same limit, not only expressions.
-    #[test]
-    fn deeply_nested_blocks_are_reported() {
-        let depth = MAX_NESTING_DEPTH * 4;
-        let source = format!(
-            "int f(void) {{ {}{} }}",
-            "{".repeat(depth),
-            "}".repeat(depth)
-        );
-
-        let messages = errors(&source);
-        assert!(
-            messages
-                .first()
-                .is_some_and(|message| message.starts_with("nesting is too deep")),
-            "got {messages:?}"
-        );
-    }
-
-    /// The depth limit leaves real stack to spare, checked on a stack far smaller than any the
-    /// parser actually runs on.
+    /// A function whose body nests `depth` levels deep in each way the grammar lets a tree grow
+    /// deeper, named for the failure message.
     ///
-    /// The point of the guard is that recursion cannot exhaust the stack, and a limit tuned so
-    /// finely that it only just fits would not deliver that — it would move the crash rather than
-    /// remove it. So this parses input deep enough to reach the limit inside a thread given a
-    /// quarter of what the test harness hands out by default. A change that fattens a parse frame
-    /// enough to matter fails here, loudly, instead of on a user's file.
-    #[test]
-    fn nesting_stays_within_a_small_stack() {
-        /// A quarter of the 2 MiB a test thread gets, and a sixteenth of the binary's main stack.
-        const SMALL_STACK: usize = 512 * 1024;
+    /// Recursion is only half of it. Parentheses, blocks, prefix operators, and assignment deepen
+    /// the tree by recursing, but a left-associative operator chain like `1 + 1 + 1` and a postfix
+    /// chain like `a[0][0][0]` deepen it inside a loop, with the parser's own call depth staying
+    /// flat. Every pass after the parser walks the tree recursively — the dump, `Drop`, and later
+    /// analysis and code generation — so each shape has to meet the same limit.
+    fn deep_programs(depth: usize) -> [(&'static str, String); 8] {
+        let body = |statement: String| format!("int f(void) {{ {statement} }}");
 
+        [
+            (
+                "parentheses",
+                body(format!(
+                    "return {}1{};",
+                    "(".repeat(depth),
+                    ")".repeat(depth)
+                )),
+            ),
+            (
+                "blocks",
+                body(format!("{}{}", "{".repeat(depth), "}".repeat(depth))),
+            ),
+            (
+                "prefix operators",
+                body(format!("return {}1;", "!".repeat(depth))),
+            ),
+            ("assignments", body(format!("{}1;", "a = ".repeat(depth)))),
+            (
+                "an operator chain",
+                body(format!("return 1{};", "+1".repeat(depth))),
+            ),
+            (
+                "an index chain",
+                body(format!("return a{};", "[0]".repeat(depth))),
+            ),
+            (
+                "a call chain",
+                body(format!("return f{};", "(0)".repeat(depth))),
+            ),
+            (
+                "an increment chain",
+                body(format!("return a{};", "++".repeat(depth))),
+            ),
+        ]
+    }
+
+    /// Whether `messages` opens with the depth-limit diagnostic.
+    fn meets_the_depth_limit(messages: &[String]) -> bool {
+        messages
+            .first()
+            .is_some_and(|message| message.starts_with("nesting is too deep"))
+    }
+
+    /// Every way of deepening the tree past the limit is a diagnostic rather than a stack overflow.
+    #[test]
+    fn every_deep_shape_meets_the_depth_limit() {
+        for (shape, source) in deep_programs(MAX_NESTING_DEPTH * 4) {
+            let messages = errors(&source);
+
+            assert!(
+                meets_the_depth_limit(&messages),
+                "{shape}: got {messages:?}"
+            );
+        }
+    }
+
+    /// Everything done with a parsed tree fits on a stack far smaller than any the compiler runs
+    /// on, however deep the input tried to make it.
+    ///
+    /// The point of the guard is that no input can exhaust the stack, and a limit tuned so finely
+    /// that it only just fits would move the crash rather than remove it. So each deep shape is
+    /// parsed, dumped, and dropped inside a thread given half of what the test harness hands out
+    /// by default, at a size — tens of thousands of levels — that overflows any walk the limit
+    /// fails to bound. Parsing alone is not enough to check: a loop can build a tree far deeper
+    /// than the parser ever recursed, and it is the dump and the drop that then descend it.
+    #[test]
+    fn deep_input_stays_within_a_small_stack() {
+        /// Half the 2 MiB a test thread gets, and an eighth of the binary's main stack — about
+        /// twice what the costliest shape, nested blocks, was measured to need at the limit.
+        const SMALL_STACK: usize = 1024 * 1024;
+
+        for (shape, source) in deep_programs(50_000) {
+            let messages_on_a_small_stack = std::thread::Builder::new()
+                .stack_size(SMALL_STACK)
+                .spawn(move || {
+                    let lexed = lexer::lex(source.as_bytes());
+                    let parsed = parse(&lexed.tokens);
+                    ast::dump(&parsed.program, Spans::Hidden);
+
+                    parsed
+                        .diagnostics
+                        .into_iter()
+                        .map(|diagnostic| diagnostic.message)
+                        .collect::<Vec<_>>()
+                })
+                .expect("could not spawn the thread")
+                .join()
+                .expect("overflowed a small stack, so the depth limit is set too high");
+
+            assert!(
+                meets_the_depth_limit(&messages_on_a_small_stack),
+                "{shape}: got {messages_on_a_small_stack:?}"
+            );
+        }
+    }
+
+    /// Every shape nested inside the limit still parses, so the guard rejects only what it must.
+    #[test]
+    fn every_shape_within_the_limit_parses() {
+        for (shape, source) in deep_programs(MAX_NESTING_DEPTH / 4) {
+            let messages = errors(&source);
+
+            assert!(messages.is_empty(), "{shape}: got {messages:?}");
+        }
+    }
+
+    /// Meeting the limit costs nothing afterwards: the levels a rejected or finished construct used
+    /// are all given back, so what follows it is judged from the depth it is actually at.
+    ///
+    /// A loop that counted its levels up but did not count them back down on every way out —
+    /// including bailing out with a diagnostic — would make each later chain look deeper than it is,
+    /// until ordinary code started meeting the limit.
+    #[test]
+    fn the_depth_limit_charges_nothing_to_what_follows() {
+        let allowed = MAX_NESTING_DEPTH / 4;
+        let chain = format!("x = 1{};", "+1".repeat(allowed));
+        let rejected = format!("return 1{};", "+1".repeat(MAX_NESTING_DEPTH * 4));
         let source = format!(
-            "int f(void) {{ return {}1{}; }}",
-            "(".repeat(MAX_NESTING_DEPTH * 4),
-            ")".repeat(MAX_NESTING_DEPTH * 4)
+            "int f(void) {{ {rejected} }} int g(void) {{ {} {rejected} {} }}",
+            chain.repeat(MAX_NESTING_DEPTH),
+            chain.repeat(MAX_NESTING_DEPTH),
         );
 
-        let parsed_on_a_small_stack = std::thread::Builder::new()
-            .stack_size(SMALL_STACK)
-            .spawn(move || errors(&source))
-            .expect("could not spawn the thread")
-            .join()
-            .expect("parsing overflowed a small stack, so the depth limit is set too high");
-
-        assert!(
-            parsed_on_a_small_stack
-                .first()
-                .is_some_and(|message| message.starts_with("nesting is too deep")),
-            "got {parsed_on_a_small_stack:?}"
+        let messages = errors(&source);
+        assert_eq!(
+            messages.len(),
+            2,
+            "expected only the two over-long chains, got {messages:?}"
         );
     }
 
-    /// Nesting that stays inside the limit still parses, so the guard rejects only what it must.
+    /// A chain whose operands are chains of their own is charged for its depth, not its length.
+    ///
+    /// In `1 * 1 + 1 * 1 + …` each `*` is one level below its `+`, so the tree is only one level
+    /// deeper than the `+` chain alone. If the levels a right operand charged were not given back
+    /// when it finished, they would pile up along the `+` chain and reject this well before its
+    /// real depth reaches the limit.
     #[test]
-    fn nesting_within_the_limit_parses() {
-        let depth = MAX_NESTING_DEPTH / 4;
+    fn an_operand_gives_back_its_levels_to_the_chain_around_it() {
+        let terms = MAX_NESTING_DEPTH * 3 / 4;
         let source = format!(
-            "int f(void) {{ return {}1{}; }}",
-            "(".repeat(depth),
-            ")".repeat(depth)
+            "int f(void) {{ return 1 * 1{}; }}",
+            " + 1 * 1".repeat(terms)
         );
 
-        assert!(dump(&source).contains("(int-lit 1)"));
+        assert_eq!(errors(&source), Vec::<String>::new());
     }
 
     /// An empty token slice is a valid, empty parse rather than an out-of-bounds read. The Phase 5

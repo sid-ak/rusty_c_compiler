@@ -72,7 +72,18 @@ impl Parser<'_> {
     /// so far becomes the left operand of the next operator. The recursive call uses one more than
     /// the current precedence, which is what stops the right operand from swallowing an operator
     /// of equal rank.
+    ///
+    /// Each pass of the loop makes the tree one level deeper without recursing, so each is charged
+    /// a nesting level explicitly; otherwise `1 + 1 + … + 1` could build a tree deeper than any
+    /// later pass can walk.
     fn binary(&mut self, min_precedence: u8) -> Result<Expr, Bail> {
+        self.restoring_depth(|parser| parser.binary_chain(min_precedence))
+    }
+
+    /// Parse a binary expression. Always reached through [`Parser::binary`], which gives back the
+    /// levels its loop charges — needed because the right operand is parsed by calling back in
+    /// here directly, so its levels would otherwise stay charged to the rest of the chain.
+    fn binary_chain(&mut self, min_precedence: u8) -> Result<Expr, Bail> {
         let mut left = self.unary()?;
 
         loop {
@@ -87,6 +98,7 @@ impl Parser<'_> {
                 break;
             }
 
+            self.deepen()?;
             self.advance();
             let right = self.binary(precedence.saturating_add(1))?;
             let span = left.span.to(right.span);
@@ -131,10 +143,22 @@ impl Parser<'_> {
     }
 
     /// Parse a primary expression and whatever postfix operators follow it.
+    ///
+    /// Like the loop in [`Parser::binary`], each operator in the chain makes the tree one level
+    /// deeper without recursing, so `a[0][0]…[0]` is charged a nesting level per operator. Only
+    /// [`Parser::unary`] reaches this, and its `nested` gives those levels back on the way out.
     fn postfix(&mut self) -> Result<Expr, Bail> {
         let mut expr = self.primary()?;
 
         loop {
+            let next = &self.peek().kind;
+            let extends = matches!(next, TokenKind::LBracket | TokenKind::LParen)
+                || postfix_operator(next).is_some();
+            if !extends {
+                break;
+            }
+            self.deepen()?;
+
             if self.at(&TokenKind::LBracket) {
                 self.advance();
                 let index = self.expression()?;

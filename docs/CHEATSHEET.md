@@ -296,18 +296,25 @@ adding a `?` to this file would replace the whole report with one about the cond
 ```bash
 python3 -c "print('int f(void) { return ' + '('*2000 + '1' + ')'*2000 + '; }')" > /tmp/deep.c
 ./target/debug/rustycc /tmp/deep.c --dump-ast | head -3
+python3 -c "print('int f(void) { return 1' + '+1'*2000 + '; }')" > /tmp/chain.c
+./target/debug/rustycc /tmp/chain.c --dump-ast | head -3
 ```
 
 ```
-/tmp/deep.c:1:85: error: nesting is too deep: the parser descends at most 128 levels
+/tmp/deep.c:1:85: error: nesting is too deep: the syntax tree goes at most 128 levels deep
+/tmp/chain.c:1:274: error: nesting is too deep: the syntax tree goes at most 128 levels deep
 ```
 
-Exit 1. Recursive descent recurses, so without this the input above is a stack overflow, and a crash
-is the one thing the front end is not allowed to produce. The limit counts parser descents rather
-than brackets — a parenthesized expression costs two — which is why the caret lands on the 64th `(`
-rather than the 128th. The number is a stack budget: a level costs roughly 4 KB in an unoptimized
-build, and a unit test parses input this deep on a deliberately undersized stack so the margin is
-enforced rather than assumed.
+Exit 1 for both. Recursive descent recurses, so without the limit the first input is a stack
+overflow, and a crash is the one thing the front end is not allowed to produce. The second input
+never makes the parser recurse — `1+1+1` is built by a loop — but it still builds a tree 2,000
+levels deep, and the dump walks that tree recursively, so it would overflow there instead. That is
+why the limit counts levels of the tree rather than the parser's own calls: a parenthesized
+expression costs two, which is why the first caret lands on the 64th `(`, and each operator in a
+chain costs one, which is why the second lands just past the 126th `+`. The number is a stack
+budget: nested blocks, the costliest shape, need about 550 KB of stack at the limit in an
+unoptimized build, and a unit test parses, dumps, and drops every deep shape on a deliberately
+undersized 1 MiB stack so the margin is enforced rather than assumed.
 
 ### 11. Bad invocations
 

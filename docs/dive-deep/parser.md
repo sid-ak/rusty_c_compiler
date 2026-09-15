@@ -66,16 +66,26 @@ and which pass notices it is an accident of how it is spelled:
 ## A nesting-depth limit
 
 Recursive descent recurses, so deeply nested parentheses would otherwise run the call stack out —
-which is a crash, and crashes are the one thing the front end is not allowed to produce. Every
-recursive entry point passes through one function that counts the descent and reports past 128
-levels instead of going deeper. The limit counts parser descents rather than brackets, which is a
-looser thing to measure but the honest one: it is the stack that is finite, not the punctuation.
+which is a crash, and crashes are the one thing the front end is not allowed to produce. So the
+parser counts how deep the tree it is building has got, and past 128 levels reports instead of
+going deeper.
 
-The number is a measured stack budget rather than a taste in style. A level costs roughly 4 KB in an
-unoptimized build, so 128 of them sit comfortably inside the 2 MiB stack the test harness gives a
-thread and far inside the 8 MiB the binary's main thread has. A test parses input at the limit on a
-deliberately undersized stack, so a change that fattens a parse frame fails there instead of turning
-back into the crash the limit exists to prevent. Real C reaches nothing close to it either way.
+What it counts is levels of the tree, not the parser's own calls and not brackets. The difference
+matters because the parser is not the only thing that walks the tree: printing it, freeing it, and
+later type checking and code generation all recurse once per level. Most shapes deepen the tree and
+the parser's call stack together — parentheses, blocks, `!!!x`, `a = b = c` — and pass through one
+function that counts the level. Two do not. `1 + 1 + 1` and `a[0][0][0]` are built by a loop, one
+level deeper per operator with the parser's own depth staying flat, so each pass of those loops
+charges its level explicitly. Without that, a 10,000-term sum parsed cleanly and then crashed the
+moment anything walked the result.
+
+The number is a measured stack budget rather than a taste in style. In an unoptimized build the
+costliest shape, nested blocks, needs about 550 KB of stack to parse, print, and free at the limit —
+inside the 2 MiB the test harness gives a thread and far inside the 8 MiB the binary's main thread
+has. A test builds every deep shape tens of thousands of levels deep and parses, prints, and frees
+each on a deliberately undersized 1 MiB stack, so a change that fattens a frame, or a new shape that
+escapes the count, fails there instead of turning back into the crash the limit exists to prevent.
+Real C reaches nothing close to it either way.
 
 This is planned for rather than discovered, because the Phase 5 fuzzer finds an unbounded stack
 within seconds of running. Until then the same property is checked the cheap way, by cutting every

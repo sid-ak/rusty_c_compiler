@@ -411,8 +411,9 @@ input, and satisfy the proposal's system-level acceptance criterion.
     - `parse`: raw bytes through lexer and parser; must never panic.
     - A third target over the full front end through semantic analysis, since Phase 3 introduces its
       own indexing and recursion.
-    - Recursion-depth guard: deeply nested parentheses or blocks must produce a "nesting too deep"
-      diagnostic rather than a stack overflow. Fuzzing will find this, so it is planned for.
+    - Recursion-depth guard: deeply nested parentheses or blocks, and long operator or postfix
+      chains, must produce a "nesting too deep" diagnostic rather than a stack overflow in any pass
+      that walks the tree. Fuzzing will find this, so it is planned for.
     - A seed corpus built from `tests/programs/`, and a documented minimum run (15 minutes per target
       locally, plus a scheduled longer CI run). Any crash found is minimized and checked in as a
       regression test.

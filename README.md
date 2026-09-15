@@ -30,8 +30,9 @@ In the repo:
   span and an identity, with no field for anything a later pass works out; plus the deterministic
   S-expression dump that parser tests assert against.
 - `src/parser/` — recursive descent over declarations and statements, precedence climbing over
-  expressions, panic-mode recovery that provably consumes a token per step, and a nesting limit that
-  turns a hostile input into a diagnostic rather than a stack overflow.
+  expressions, panic-mode recovery that provably consumes a token per step, and a limit on how
+  deep the tree may grow — through nesting or through long operator chains — that turns a hostile
+  input into a diagnostic rather than a stack overflow.
 - `tests/programs/` — five subset-C programs, one per feature area, with a coverage matrix that CI
   holds them to. They are the parser's snapshots now and the differential corpus later.
 - `runtime/shim.c` — `print_int`, `print_char`, and `print_string` on `write(2)`, compiled once by

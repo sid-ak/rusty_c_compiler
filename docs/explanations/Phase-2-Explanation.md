@@ -282,15 +282,28 @@ test harness is two megabytes, so at 256 the guard sat at roughly half the avail
 passing only because of that default, and one slightly fatter function away from failing.
 
 In a sense that is worse than having no guard: a limit tuned so finely that it only just fits
-relocates the crash rather than removing it. The limit is now 128, using about seven hundred
-kilobytes — comfortable inside two megabytes, and a small fraction of the eight the real program
+relocates the crash rather than removing it. The limit is now 128, which at its costliest takes about
+550 kilobytes — comfortable inside two megabytes, and a small fraction of the eight the real program
 gets.
 
 Rather than trusting that, there is a test that starts a thread with a deliberately undersized
-512-kilobyte stack and parses input deep enough to reach the limit. It was verified to actually bite
-by temporarily setting the limit back to 256, at which point it aborts with a stack overflow. So if
-anyone later makes a parsing function hold more local data, that test fails loudly instead of the
-crash quietly returning.
+stack and pushes input far past the limit through everything that walks the tree. It was verified to
+actually bite by temporarily setting the limit back to 256, at which point it aborts with a stack
+overflow. So if anyone later makes a parsing function hold more local data, that test fails loudly
+instead of the crash quietly returning.
+
+Review of this phase found the counter had one blind spot, and it is worth knowing why. It counted
+the parser's own recursion, but what actually runs out is the depth of the tree, because printing
+the tree and freeing it both recurse once per level. A left-associative chain like `1 + 1 + 1` is
+built by a loop, not by recursion: each `+` wraps everything so far as its left operand, making the
+tree one level deeper while the parser's call depth stays flat. So a 10,000-term sum parsed without
+complaint and then crashed printing it. The same was true of postfix chains like `a[0][0][0]`. Each
+pass of those two loops now charges a level too, so the limit bounds the tree itself. The stack test
+was widened to match: it builds every shape that can deepen the tree — nested brackets and blocks,
+prefix operators, assignments, and the operator, index, call, and increment chains — and parses,
+prints, and frees each one. Measuring all of them showed nested blocks are the costliest, at about
+550 kilobytes at the limit, so the test's stack is one megabyte: half of what a test thread gets,
+and an eighth of what the real program has.
 
 ## Part three: proving it works
 
