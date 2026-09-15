@@ -24,9 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # TEMPORARY-TEST-PR: write access for the job token below. Restore to read before merging.
-      pull-requests: write
-      issues: write
+      pull-requests: read
+      issues: read
       id-token: write
 
     steps:
@@ -98,10 +97,6 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # TEMPORARY-TEST-PR: the Claude app token is refused while this file differs from main.
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          # TEMPORARY-TEST-PR: full transcript in the log while verifying.
-          show_full_output: "true"
           # The prompt is written out here rather than using the code-review plugin, whose command
           # cannot be scoped: it always reviews the whole pull request through `gh pr diff`, stops
           # when Claude has commented before, and checks CLAUDE.md files this repository does not
@@ -182,8 +177,7 @@ jobs:
       # The full transcript of a run that failed, for working out why without leaving
       # `show_full_output` on in this public repository's logs. Kept briefly.
       - name: Upload the transcript of a failed review
-        # TEMPORARY-TEST-PR: always, while verifying. Restore to failure() before merging.
-        if: always() && steps.claude-review.outputs.execution_file != ''
+        if: failure() && steps.claude-review.outputs.execution_file != ''
         uses: actions/upload-artifact@v4
         with:
           name: claude-review-transcript
