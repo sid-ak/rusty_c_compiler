@@ -21,8 +21,11 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
-use rustycc::lexer;
+use rustycc::lexer::{self, TokenKind};
 use rustycc::parser;
 
 /// The valid programs, which the truncation corpus is generated from.
@@ -30,6 +33,12 @@ const CORPUS: &str = "tests/programs";
 
 /// The hand-written awkward inputs.
 const ADVERSARIAL: &str = "tests/adversarial";
+
+/// How long a whole sweep over a corpus may take before it counts as a hang.
+///
+/// Each sweep finishes in well under a second, so this is two orders of magnitude of headroom for a
+/// slow CI runner rather than a performance budget.
+const TIME_LIMIT: Duration = Duration::from_secs(30);
 
 /// Every `.c` file in `directory`, sorted, so a failure names the same file on every machine.
 fn programs(directory: &str) -> Vec<PathBuf> {
@@ -69,31 +78,87 @@ fn token_boundaries(source: &[u8]) -> Vec<usize> {
         .collect()
 }
 
+/// Run `work` on its own thread and return its result, failing the test if it has not finished
+/// within `limit`.
+///
+/// A hang does not fail a test, it stalls the whole suite, so a property that is really about
+/// termination has to put a clock on it to be a test at all. The thread is left running on a
+/// timeout; the test binary exits regardless once every test has reported.
+fn finishes_within<T: Send + 'static>(
+    limit: Duration,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> T {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        // The receiver is gone only if the test already timed out, so the result is unwanted.
+        let _ = sender.send(work());
+    });
+
+    receiver
+        .recv_timeout(limit)
+        .expect("did not finish in time, so it probably loops forever")
+}
+
+/// A token stream that does not end in `Eof` parses exactly as the same stream with it.
+///
+/// Only the lexer promises that trailing `Eof`; `parser::parse` is public and the Phase 5 fuzz
+/// targets hand it arbitrary slices, so it must not rely on it — not to terminate, and not to know
+/// where the input ends when it points a diagnostic there. Every token-boundary prefix of the corpus
+/// is checked, so the prefixes that end mid-construct exercise every recovery loop.
+#[test]
+fn a_stream_without_its_eof_parses_as_if_it_had_one() {
+    finishes_within(TIME_LIMIT, || {
+        for path in programs(CORPUS) {
+            let source = fs::read(&path).expect("a corpus program should be readable");
+
+            for end in token_boundaries(&source) {
+                let prefix = source.get(..end).unwrap_or(&source);
+                let tokens = lexer::lex(prefix).tokens;
+                let without_eof = match tokens.split_last() {
+                    Some((last, rest)) if last.kind == TokenKind::Eof => rest,
+                    _ => panic!("the lexer should end every stream in Eof"),
+                };
+
+                assert_eq!(
+                    parser::parse(without_eof),
+                    parser::parse(&tokens),
+                    "{} cut at byte {end}",
+                    path.display()
+                );
+            }
+        }
+    });
+}
+
 /// Every prefix of every corpus program, cut at a token boundary, parses without panicking.
 #[test]
 fn token_level_truncations_do_not_panic() {
-    for path in programs(CORPUS) {
-        let source = fs::read(&path).expect("a corpus program should be readable");
+    finishes_within(TIME_LIMIT, || {
+        for path in programs(CORPUS) {
+            let source = fs::read(&path).expect("a corpus program should be readable");
 
-        for end in token_boundaries(&source) {
-            let prefix = source.get(..end).unwrap_or(&source);
-            parse(prefix);
+            for end in token_boundaries(&source) {
+                let prefix = source.get(..end).unwrap_or(&source);
+                parse(prefix);
+            }
         }
-    }
+    });
 }
 
 /// Every prefix cut at an arbitrary byte parses too, which covers what a token-boundary cut cannot
 /// produce: half a literal, half a comment, half an operator.
 #[test]
 fn byte_level_truncations_do_not_panic() {
-    for path in programs(CORPUS) {
-        let source = fs::read(&path).expect("a corpus program should be readable");
+    finishes_within(TIME_LIMIT, || {
+        for path in programs(CORPUS) {
+            let source = fs::read(&path).expect("a corpus program should be readable");
 
-        for end in 0..=source.len() {
-            let prefix = source.get(..end).unwrap_or_default();
-            parse(prefix);
+            for end in 0..=source.len() {
+                let prefix = source.get(..end).unwrap_or_default();
+                parse(prefix);
+            }
         }
-    }
+    });
 }
 
 /// Cutting a program short is never silently fine: a prefix that stops mid-construct is reported.
@@ -118,10 +183,12 @@ fn adversarial_inputs_do_not_panic() {
     let paths = programs(ADVERSARIAL);
     assert!(paths.len() >= 8, "expected the checked-in adversarial set");
 
-    for path in paths {
-        let source = fs::read(&path).expect("an adversarial input should be readable");
-        parse(&source);
-    }
+    finishes_within(TIME_LIMIT, || {
+        for path in paths {
+            let source = fs::read(&path).expect("an adversarial input should be readable");
+            parse(&source);
+        }
+    });
 }
 
 /// The inputs with nothing in them parse to an empty program and report nothing.

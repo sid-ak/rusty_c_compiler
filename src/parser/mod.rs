@@ -56,16 +56,6 @@ use crate::lexer::{Keyword, Token, TokenKind};
 /// parse frame fatter fails there rather than as a crash on someone's input.
 pub const MAX_NESTING_DEPTH: usize = 128;
 
-/// The token a lookup past the end of the stream reports.
-///
-/// The lexer always ends its stream with `Eof`, so this is reached only if the parser is handed an
-/// empty slice — which the Phase 5 fuzz targets can do. Answering with a token rather than a `None`
-/// keeps every lookahead site free of a case that cannot occur in a real stream.
-const END_OF_STREAM: Token = Token {
-    kind: TokenKind::Eof,
-    span: Span { start: 0, end: 0 },
-};
-
 /// Everything one parse of a token stream produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parsed {
@@ -106,13 +96,24 @@ struct Parser<'tokens> {
     ids: NodeIds,
     /// Problems found so far.
     diagnostics: DiagnosticBag,
+    /// The token every lookup past the end of the stream reports: `Eof`, just after the last token.
+    ///
+    /// The lexer ends its stream with `Eof`, but `parse` is public and may be handed a slice that
+    /// does not — the Phase 5 fuzz targets do exactly that. Answering past-the-end lookups with an
+    /// `Eof` of the parser's own, rather than repeating the last real token, is what lets every
+    /// `while !at_eof()` loop end on such a slice, and placing it where the input stops keeps a
+    /// diagnostic about the missing rest pointing at the end of the file rather than its start.
+    end_of_stream: Token,
 }
 
 impl<'tokens> Parser<'tokens> {
     /// A parser positioned at the start of `tokens`.
     fn new(tokens: &'tokens [Token]) -> Self {
+        let end = tokens.last().map_or(0, |last| last.span.end);
+
         Self {
             tokens,
+            end_of_stream: Token::new(TokenKind::Eof, Span::empty_at(end)),
             position: 0,
             depth: 0,
             ids: NodeIds::new(),
@@ -714,10 +715,7 @@ impl<'tokens> Parser<'tokens> {
 
     /// The token at `index`, or the end of the stream if the index is past it.
     fn token_at(&self, index: usize) -> &Token {
-        self.tokens
-            .get(index)
-            .or_else(|| self.tokens.last())
-            .unwrap_or(&END_OF_STREAM)
+        self.tokens.get(index).unwrap_or(&self.end_of_stream)
     }
 
     /// The next token, without consuming it.
