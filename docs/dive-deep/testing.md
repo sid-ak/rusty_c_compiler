@@ -4,8 +4,9 @@
 
 Each tier catches what the tier below it cannot:
 
-- Unit test: an in-crate `#[cfg(test)]` module exercising one component in isolation. Where most of
-  the lexer's and analyzer's coverage lives.
+- Unit test: an in-crate `#[cfg(test)]` module exercising one component in isolation, kept in that
+  module's own `tests.rs` file (`src/lexer/tests.rs` for the lexer) so the source file holds only
+  the code. Where most of the lexer's and analyzer's coverage lives.
 - Snapshot test: a rendered structure — token stream, AST dump, assembly text, diagnostic rendering —
   compared against a checked-in expected file, via `insta`. Snapshots are how parser tests assert AST
   shape, which is the only reliable way to test operator precedence: asserting that `1+2*3` evaluates
