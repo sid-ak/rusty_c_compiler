@@ -21,8 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      # TEMPORARY write access: the test-only github_token below posts with this job's token.
+      pull-requests: write
+      issues: write
       id-token: write
 
     steps:
@@ -36,6 +37,9 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # TEMPORARY, test PR only: the Claude app token is refused while this file differs
+          # from main, so a workflow change cannot otherwise run on its own PR.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           # The skill's step 1 stops when Claude has already commented on the pull request.
