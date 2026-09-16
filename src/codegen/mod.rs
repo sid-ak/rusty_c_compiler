@@ -16,11 +16,24 @@ pub mod emit;
 pub mod expr;
 pub mod frame;
 
-use crate::ast::{Block, FuncDef, Item, Program, Stmt, StmtKind};
+use crate::ast::{Block, Expr, ForInit, FuncDef, Item, Program, Stmt, StmtKind};
 use crate::codegen::emit::{Emitter, Width};
 use crate::codegen::frame::{temporaries_needed, FrameLayout};
 use crate::diagnostics::{Diagnostic, DiagnosticKind, Span};
 use crate::sema::annotations::Annotations;
+
+/// Where `break` and `continue` go from inside one loop.
+///
+/// A stack of these, rather than one pair, is what makes the innermost loop the one they apply to.
+/// The two labels differ for a `for`: `continue` goes to the step clause, not to the condition, so
+/// the loop still advances.
+#[derive(Debug, Clone)]
+pub(crate) struct LoopLabels {
+    /// Where `break` goes: past the end of the loop.
+    pub(crate) exit: String,
+    /// Where `continue` goes: on to the next iteration, through the step clause if there is one.
+    pub(crate) next: String,
+}
 
 /// What code generation produced.
 #[derive(Debug, Clone)]
@@ -60,6 +73,8 @@ pub(crate) struct Generator<'a> {
     pub(crate) depth: u32,
     /// The label every `return` in the current function branches to.
     pub(crate) epilogue: String,
+    /// The enclosing loops, innermost last, giving `break` and `continue` somewhere to go.
+    pub(crate) loops: Vec<LoopLabels>,
     /// Gaps in the generator found while walking.
     pub(crate) diagnostics: Vec<Diagnostic>,
 }
@@ -73,6 +88,7 @@ impl<'a> Generator<'a> {
             layout: FrameLayout::build(&crate::sema::annotations::Frame::default(), 0),
             depth: 0,
             epilogue: String::new(),
+            loops: Vec::new(),
             diagnostics: Vec::new(),
         }
     }
@@ -114,7 +130,13 @@ impl<'a> Generator<'a> {
         self.block(&def.body);
 
         // Falling out of the body is reaching the end of the function. Analysis proved that only
-        // happens where the return value does not matter, so the epilogue is simply next.
+        // happens in `main` or in a `void` function, so the only value that has to be produced here
+        // is `main`'s implicit zero. An explicit `return` branches straight to the label below and
+        // never passes through it.
+        if name == "main" {
+            self.emitter.instruction("mov w0, #0");
+        }
+
         self.emitter.place_label(&self.epilogue.clone());
         self.layout.emit_epilogue(&mut self.emitter);
     }
@@ -142,12 +164,126 @@ impl<'a> Generator<'a> {
                 self.emitter.branch(&self.epilogue.clone());
             }
             StmtKind::Empty => {}
-            StmtKind::If { .. } => self.unlowered(stmt.span, "an `if` statement"),
-            StmtKind::While { .. } => self.unlowered(stmt.span, "a `while` loop"),
-            StmtKind::For { .. } => self.unlowered(stmt.span, "a `for` loop"),
-            StmtKind::Break => self.unlowered(stmt.span, "`break`"),
-            StmtKind::Continue => self.unlowered(stmt.span, "`continue`"),
+            StmtKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => self.branch(condition, then_branch, else_branch.as_deref()),
+            StmtKind::While { condition, body } => self.while_loop(condition, body),
+            StmtKind::For {
+                init,
+                condition,
+                step,
+                body,
+            } => self.for_loop(init.as_deref(), condition.as_ref(), step.as_ref(), body),
+            StmtKind::Break => self.leave_loop(stmt.span, true),
+            StmtKind::Continue => self.leave_loop(stmt.span, false),
         }
+    }
+
+    /// Lowers an `if`, with or without an `else`.
+    ///
+    /// The `then` arm ends in a jump past the `else` arm, because the two are laid out one after
+    /// the other and falling out of the first into the second would run both.
+    fn branch(&mut self, condition: &Expr, then_branch: &Stmt, else_branch: Option<&Stmt>) {
+        let end = self.emitter.new_label("if_end");
+        let otherwise = match else_branch {
+            Some(_) => self.emitter.new_label("if_else"),
+            None => end.clone(),
+        };
+
+        self.expr(condition);
+        self.emitter.branch_if_zero("w0", &otherwise);
+        self.stmt(then_branch);
+
+        if let Some(else_branch) = else_branch {
+            self.emitter.branch(&end);
+            self.emitter.place_label(&otherwise);
+            self.stmt(else_branch);
+        }
+
+        self.emitter.place_label(&end);
+    }
+
+    /// Lowers a `while`, testing before each iteration.
+    fn while_loop(&mut self, condition: &Expr, body: &Stmt) {
+        let top = self.emitter.new_label("while_top");
+        let end = self.emitter.new_label("while_end");
+
+        self.emitter.place_label(&top);
+        self.expr(condition);
+        self.emitter.branch_if_zero("w0", &end);
+
+        // `continue` goes back to the condition, since a `while` has no step clause.
+        self.loops.push(LoopLabels {
+            exit: end.clone(),
+            next: top.clone(),
+        });
+        self.stmt(body);
+        self.loops.pop();
+
+        self.emitter.branch(&top);
+        self.emitter.place_label(&end);
+    }
+
+    /// Lowers a `for`, with any of its three clauses absent.
+    fn for_loop(
+        &mut self,
+        init: Option<&ForInit>,
+        condition: Option<&Expr>,
+        step: Option<&Expr>,
+        body: &Stmt,
+    ) {
+        let top = self.emitter.new_label("for_top");
+        let step_label = self.emitter.new_label("for_step");
+        let end = self.emitter.new_label("for_end");
+
+        match init {
+            Some(ForInit::Decl(decl)) => self.local(decl),
+            Some(ForInit::Expr(expr)) => self.expr(expr),
+            None => {}
+        }
+
+        self.emitter.place_label(&top);
+        // An absent condition is a condition that never fails, so nothing is tested at all.
+        if let Some(condition) = condition {
+            self.expr(condition);
+            self.emitter.branch_if_zero("w0", &end);
+        }
+
+        // `continue` goes to the step clause rather than to the condition. Sending it to the
+        // condition would skip the step, and a loop counting with one would never advance.
+        self.loops.push(LoopLabels {
+            exit: end.clone(),
+            next: step_label.clone(),
+        });
+        self.stmt(body);
+        self.loops.pop();
+
+        self.emitter.place_label(&step_label);
+        if let Some(step) = step {
+            self.expr(step);
+        }
+        self.emitter.branch(&top);
+        self.emitter.place_label(&end);
+    }
+
+    /// Lowers `break` or `continue` against the innermost enclosing loop.
+    fn leave_loop(&mut self, span: Span, breaking: bool) {
+        let Some(labels) = self.loops.last() else {
+            // Analysis rejects these outside a loop, so reaching here is a gap in the compiler
+            // rather than a problem with the program.
+            self.unlowered(span, "`break` or `continue` outside a loop");
+
+            return;
+        };
+
+        let target = if breaking {
+            labels.exit.clone()
+        } else {
+            labels.next.clone()
+        };
+        self.emitter.branch(&target);
     }
 
     /// Lowers a local declaration, storing its initializer if it has one.

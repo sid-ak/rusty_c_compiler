@@ -1,0 +1,30 @@
+---
+source: tests/codegen_programs.rs
+expression: "int answer(void) { int t = 0; for (;;) { t = 1; break; } return t; }"
+---
+	.section	__TEXT,__text,regular,pure_instructions
+	.globl	_answer
+	.p2align	2
+_answer:
+	stp x29, x30, [sp, #-48]!
+	mov x29, sp
+	movz w0, #0
+	str w0, [x29, #16]
+Lfor_top_1:
+	add x0, x29, #16
+	str x0, [x29, #24]
+	movz w0, #1
+	ldr x2, [x29, #24]
+	str w0, [x2]
+	b Lfor_end_3
+Lfor_step_2:
+	b Lfor_top_1
+Lfor_end_3:
+	add x0, x29, #16
+	ldr w0, [x0]
+	b Lanswer_return_0
+Lanswer_return_0:
+	mov sp, x29
+	ldp x29, x30, [sp], #48
+	ret
+.subsections_via_symbols

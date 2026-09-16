@@ -432,6 +432,171 @@ fn slug(shape: &str) -> String {
     shape.replace(' ', "-")
 }
 
+/// `if` and `else` pick exactly one arm, and chains nest correctly.
+#[test]
+fn branches_take_one_arm() {
+    let cases = [
+        ("if taken", "if (1) { return 1; } return 2;", "1"),
+        ("if not taken", "if (0) { return 1; } return 2;", "2"),
+        ("else taken", "if (0) { return 1; } else { return 2; } return 3;", "2"),
+        ("if taken with an else present", "if (1) { return 1; } else { return 2; } return 3;", "1"),
+        ("no fallthrough into else", "int n = 0; if (1) { n = 1; } else { n = 2; } return n;", "1"),
+        (
+            "else if chain, first",
+            "int n = 1; if (n == 1) { return 10; } else if (n == 2) { return 20; } else { return 30; }",
+            "10",
+        ),
+        (
+            "else if chain, middle",
+            "int n = 2; if (n == 1) { return 10; } else if (n == 2) { return 20; } else { return 30; }",
+            "20",
+        ),
+        (
+            "else if chain, last",
+            "int n = 3; if (n == 1) { return 10; } else if (n == 2) { return 20; } else { return 30; }",
+            "30",
+        ),
+        (
+            "dangling else binds to the nearest if",
+            "int n = 0; if (1) if (0) n = 1; else n = 2; return n;",
+            "2",
+        ),
+        ("body without braces", "int n = 0; if (1) n = 5; return n;", "5"),
+        ("nested ifs", "int n = 0; if (1) { if (1) { n = 7; } } return n;", "7"),
+    ];
+
+    for (shape, body, expected) in cases {
+        assert_eq!(answer(&slug(shape), body), expected, "{shape}");
+    }
+}
+
+/// `while` tests before each iteration and runs until its condition fails.
+#[test]
+fn while_loops_run_and_terminate() {
+    let cases = [
+        ("never entered", "int n = 0; while (0) { n = 1; } return n;", "0"),
+        ("counts up", "int n = 0; while (n < 5) { n = n + 1; } return n;", "5"),
+        ("sums", "int i = 0; int t = 0; while (i < 5) { t = t + i; i = i + 1; } return t;", "10"),
+        ("break leaves early", "int n = 0; while (1) { n = n + 1; if (n == 3) { break; } } return n;", "3"),
+        (
+            "continue skips the rest of the body",
+            "int i = 0; int t = 0; while (i < 5) { i = i + 1; if (i == 3) { continue; } t = t + i; } return t;",
+            "12",
+        ),
+    ];
+
+    for (shape, body, expected) in cases {
+        assert_eq!(answer(&slug(shape), body), expected, "{shape}");
+    }
+}
+
+/// Every combination of present and absent `for` clauses behaves as C says.
+#[test]
+fn for_loops_handle_every_clause_combination() {
+    let cases = [
+        ("all three clauses", "int t = 0; for (int i = 0; i < 4; i = i + 1) { t = t + i; } return t;", "6"),
+        ("declaration in the init", "int t = 0; for (int i = 1; i <= 3; i = i + 1) { t = t * 10 + i; } return t;", "123"),
+        ("expression in the init", "int i; int t = 0; for (i = 0; i < 3; i = i + 1) { t = t + 1; } return t;", "3"),
+        ("no init", "int i = 0; int t = 0; for (; i < 3; i = i + 1) { t = t + 1; } return t;", "3"),
+        ("no step", "int t = 0; for (int i = 0; i < 3;) { t = t + 1; i = i + 1; } return t;", "3"),
+        ("no condition", "int t = 0; for (int i = 0; ; i = i + 1) { t = t + 1; if (i == 2) { break; } } return t;", "3"),
+        ("no init or step", "int i = 0; int t = 0; for (; i < 3;) { t = t + 1; i = i + 1; } return t;", "3"),
+        ("no clauses at all", "int t = 0; for (;;) { t = t + 1; if (t == 4) { break; } } return t;", "4"),
+        ("the init variable does not escape", "int i = 99; for (int i = 0; i < 3; i = i + 1) { } return i;", "99"),
+    ];
+
+    for (shape, body, expected) in cases {
+        assert_eq!(answer(&slug(shape), body), expected, "{shape}");
+    }
+}
+
+/// `continue` in a `for` runs the step clause, so the loop still advances.
+///
+/// Without this the loop would spin forever on the value that triggered the `continue`, so the test
+/// would hang rather than print the wrong number — which is itself the signal.
+#[test]
+fn continue_in_a_for_still_runs_the_step() {
+    assert_eq!(
+        answer(
+            "for-continue",
+            "int t = 0; for (int i = 0; i < 5; i = i + 1) { if (i == 2) { continue; } t = t + i; } return t;"
+        ),
+        "8"
+    );
+}
+
+/// `break` and `continue` apply to the innermost loop enclosing them, not to any outer one.
+#[test]
+fn break_and_continue_bind_to_the_innermost_loop() {
+    let cases = [
+        (
+            "break leaves only the inner loop",
+            "int t = 0; for (int i = 0; i < 3; i = i + 1) { for (int j = 0; j < 3; j = j + 1) { if (j == 1) { break; } t = t + 1; } } return t;",
+            "3",
+        ),
+        (
+            "continue skips only the inner iteration",
+            "int t = 0; for (int i = 0; i < 2; i = i + 1) { for (int j = 0; j < 3; j = j + 1) { if (j == 1) { continue; } t = t + 1; } } return t;",
+            "4",
+        ),
+        (
+            "three levels, break at the innermost",
+            "int t = 0; for (int i = 0; i < 2; i = i + 1) { for (int j = 0; j < 2; j = j + 1) { for (int k = 0; k < 5; k = k + 1) { if (k == 2) { break; } t = t + 1; } } } return t;",
+            "8",
+        ),
+        (
+            "a while inside a for",
+            "int t = 0; for (int i = 0; i < 3; i = i + 1) { int j = 0; while (1) { j = j + 1; if (j == 2) { break; } t = t + 1; } } return t;",
+            "3",
+        ),
+    ];
+
+    for (shape, body, expected) in cases {
+        assert_eq!(answer(&slug(shape), body), expected, "{shape}");
+    }
+}
+
+/// A `return` inside nested loops leaves the function, not just the loop.
+#[test]
+fn a_return_inside_nested_loops_leaves_the_function() {
+    assert_eq!(
+        answer(
+            "return-from-loops",
+            "for (int i = 0; i < 9; i = i + 1) { for (int j = 0; j < 9; j = j + 1) { if (i * 10 + j == 34) { return 34; } } } return 0;"
+        ),
+        "34"
+    );
+}
+
+/// `main` that reaches its closing brace exits zero, which C defines for `main` alone.
+#[test]
+fn main_without_a_return_exits_zero() {
+    let assembly = assemble("int main(void) { int x; x = 5; }");
+    let directory = scratch("implicit-return");
+    let path = directory.join("out.s");
+    let binary = directory.join("program");
+
+    fs::write(&path, &assembly).expect("could not write the assembly");
+    let built = Command::new("clang")
+        .args(["-std=c99", "-O0"])
+        .arg(&path)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .expect("could not run clang");
+    assert!(
+        built.status.success(),
+        "linking failed:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+
+    let run = Command::new(&binary)
+        .output()
+        .expect("could not run the program");
+
+    assert_eq!(run.status.code(), Some(0));
+}
+
 /// Assembles `assembly` with `clang -c -Werror`, failing on anything at all on stderr.
 fn assembles_cleanly(name: &str, assembly: &str) {
     let directory = scratch(name);
@@ -489,6 +654,15 @@ const CONSTRUCTS: &[(&str, &str)] = &[
     ),
     ("unary", "int answer(void) { return -!0; }"),
     ("large_constant", "int answer(void) { return 123456789; }"),
+    ("if_only", "int answer(void) { int n = 0; if (n) { n = 1; } return n; }"),
+    ("if_else", "int answer(void) { int n = 0; if (n) { n = 1; } else { n = 2; } return n; }"),
+    ("while_loop", "int answer(void) { int n = 0; while (n < 3) { n = n + 1; } return n; }"),
+    ("while_break", "int answer(void) { int n = 0; while (1) { n = n + 1; break; } return n; }"),
+    ("for_full", "int answer(void) { int t = 0; for (int i = 0; i < 3; i = i + 1) { t = t + i; } return t; }"),
+    ("for_no_condition", "int answer(void) { int t = 0; for (int i = 0; ; i = i + 1) { t = t + 1; break; } return t; }"),
+    ("for_empty_clauses", "int answer(void) { int t = 0; for (;;) { t = 1; break; } return t; }"),
+    ("for_continue", "int answer(void) { int t = 0; for (int i = 0; i < 3; i = i + 1) { continue; } return t; }"),
+    ("implicit_main_return", "int main(void) { int x; x = 5; }"),
 ];
 
 /// The emitted assembly for each construct, pinned so a regression is a readable diff.
