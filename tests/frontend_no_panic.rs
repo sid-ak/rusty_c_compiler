@@ -13,6 +13,11 @@
 //! Beside that sits a small set of hand-written inputs in `tests/adversarial/`, aimed at the
 //! specific ways a recursive-descent parser falls over: nesting deep enough to exhaust the call
 //! stack, files that are nothing but operators, files with no tokens at all.
+//!
+//! And beside that, `fuzz/regressions/`, which is where an input a fuzz run crashed on is kept once
+//! it has been minimized. A fuzz corpus is the wrong place to guarantee a crash stays fixed — it is
+//! machine-specific, it is regenerated, and nobody re-fuzzes before merging — so a finding graduates
+//! into an ordinary test here, run by `cargo test` on every change.
 
 // clippy.toml exempts test code from the panic-adjacent lints, but only inside `#[test]` bodies;
 // the helpers below are test scaffolding too, and a fixture that cannot be read is a broken
@@ -27,12 +32,16 @@ use std::time::Duration;
 
 use rustycc::lexer::{self, TokenKind};
 use rustycc::parser;
+use rustycc::sema;
 
 /// The valid programs, which the truncation corpus is generated from.
 const CORPUS: &str = "tests/programs";
 
 /// The hand-written awkward inputs.
 const ADVERSARIAL: &str = "tests/adversarial";
+
+/// The inputs a fuzz run crashed on, minimized and kept.
+const REGRESSIONS: &str = "fuzz/regressions";
 
 /// How long a whole sweep over a corpus may take before it counts as a hang.
 ///
@@ -258,4 +267,44 @@ fn very_long_tokens_are_carried_through() {
 
     assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
     assert_eq!(parsed.program.items.len(), 1);
+}
+
+/// Every awkward input goes through the whole front end, not only the parser, without panicking.
+///
+/// Semantic analysis has recursion and indexing of its own — a scope stack, a side table keyed by
+/// node id, a second walk over the tree — and it is handed trees the parser built while recovering
+/// from an error, which is the one shape it never sees in ordinary use. The `frontend` fuzz target
+/// covers the same ground on arbitrary bytes; this covers it on the inputs already written down,
+/// in the suite that runs on every change rather than the one that needs a nightly toolchain.
+///
+/// It also runs over `fuzz/regressions/`, which is where a minimized fuzz crash goes to become a
+/// permanent test. That directory is empty today, so the adversarial set is what makes this test
+/// non-vacuous — a sweep over nothing would pass no matter what the front end did.
+#[test]
+fn the_whole_front_end_survives_the_awkward_inputs() {
+    let mut paths = programs(ADVERSARIAL);
+    assert!(paths.len() >= 8, "expected the checked-in adversarial set");
+
+    if Path::new(REGRESSIONS).is_dir() {
+        paths.extend(programs(REGRESSIONS));
+    }
+
+    finishes_within(TIME_LIMIT, || {
+        for path in paths {
+            let source = fs::read(&path).expect("an input should be readable");
+            let lexed = lexer::lex(&source);
+            let parsed = parser::parse(&lexed.tokens);
+            let analysis = sema::analyze(&parsed.program);
+
+            // Dumping walks the tree and reads the side table, which is where a node id that
+            // collided or a node that was never annotated turns into a wrong lookup.
+            analysis.annotations.dump();
+
+            assert!(
+                analysis.is_accepted() || !analysis.diagnostics.is_empty(),
+                "{} was neither accepted nor reported on",
+                path.display()
+            );
+        }
+    });
 }

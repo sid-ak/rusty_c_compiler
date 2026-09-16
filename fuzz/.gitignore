@@ -1,0 +1,10 @@
+# Built fuzz binaries, and the working state of a run.
+#
+# The seed corpus is not checked in either: `scripts/fuzz.sh` builds it from `tests/programs/` and
+# `tests/adversarial/`, which are already in the repository. A second copy of those files here would
+# be one more thing to keep in step with them, and it would go stale the first time a program was
+# added to the corpus.
+target
+artifacts
+corpus
+coverage
