@@ -33,7 +33,7 @@ pub struct SymbolId(u32);
 ///
 /// The number is an ordinal, not an offset: it says which slot, and the code generator decides
 /// where that slot sits once it knows the whole frame.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SlotId(pub u32);
 
 /// What kind of thing a symbol names, and where the code generator will find it.

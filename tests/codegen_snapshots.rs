@@ -14,7 +14,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use rustycc::codegen::emit::Emitter;
+use rustycc::codegen::emit::{Emitter, Width};
+use rustycc::codegen::frame::FrameLayout;
+use rustycc::sema::annotations::{Frame, FrameSlot};
+use rustycc::sema::scope::{SlotId, SymbolKind};
+use rustycc::sema::types::Ty;
 
 /// A scratch directory under Cargo's output directory, unique to `name`.
 fn scratch(name: &str) -> PathBuf {
@@ -112,4 +116,172 @@ fn the_skeleton_assembles_cleanly() {
 #[test]
 fn every_section_assembles_cleanly() {
     assembles_cleanly("every-section", &every_section());
+}
+
+/// Assembles `assembly`, links it with `driver`, runs the result, and returns its stdout.
+///
+/// The only way to find out whether a frame is laid out correctly is to run a function that uses
+/// it. A snapshot says what was emitted and the assembler says it is legal; neither says the value
+/// came back.
+fn run_with_driver(name: &str, assembly: &str, driver: &str) -> String {
+    let directory = scratch(name);
+    let source = directory.join("out.s");
+    let main = directory.join("main.c");
+    let binary = directory.join("program");
+
+    fs::write(&source, assembly).expect("could not write the assembly");
+    fs::write(&main, driver).expect("could not write the driver");
+
+    let built = Command::new("clang")
+        .args(["-std=c99", "-O0"])
+        .arg(&source)
+        .arg(&main)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .expect("could not run clang; run xcode-select --install");
+    assert!(
+        built.status.success(),
+        "linking failed:\n{}\n--- assembly ---\n{assembly}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+
+    let run = Command::new(&binary)
+        .output()
+        .expect("could not run the program");
+    assert!(
+        run.status.success(),
+        "the program exited with {:?}",
+        run.status.code()
+    );
+
+    String::from_utf8_lossy(&run.stdout).into_owned()
+}
+
+/// One local of `size` bytes, so a frame can be made as large as a test needs.
+fn local(index: u32, name: &str, size: u64, align: u64) -> FrameSlot {
+    FrameSlot {
+        slot: SlotId(index),
+        name: name.to_owned(),
+        ty: Ty::Int,
+        size,
+        align,
+        kind: SymbolKind::Local,
+    }
+}
+
+/// A function whose frame is far larger than any load or store immediate can reach.
+///
+/// It takes one `int`, writes it into the highest slot in the frame, reads it back, and returns it.
+/// Every access to that slot has to go through the materialization path, so a truncated or
+/// mis-scaled offset shows up as a wrong answer rather than as anything subtler.
+fn far_slot_program() -> String {
+    let frame = Frame {
+        slots: vec![local(0, "padding", 40_000, 4), local(1, "far", 4, 4)],
+    };
+    let layout = FrameLayout::build(&frame, 0);
+    let far = layout
+        .offset_of(SlotId(1))
+        .expect("the far slot is laid out");
+
+    let mut emitter = Emitter::new();
+    emitter.begin_function("far_slot");
+    layout.emit_prologue(&mut emitter, &[]);
+    emitter.store_to_frame("w0", Width::Word, far);
+    emitter.instruction("mov w0, #0");
+    emitter.load_from_frame("w0", Width::Word, far);
+    layout.emit_epilogue(&mut emitter);
+
+    emitter.finish()
+}
+
+/// A frame too large for any immediate offset still stores and loads the right value.
+#[test]
+fn a_far_slot_survives_a_round_trip() {
+    let assembly = far_slot_program();
+
+    assert!(
+        assembly.contains("add x9, x29, x9"),
+        "this test is only meaningful on the materialization path:\n{assembly}"
+    );
+
+    let output = run_with_driver(
+        "far-slot",
+        &assembly,
+        "#include <stdio.h>\nint far_slot(int n);\nint main(void) { printf(\"%d\\n\", far_slot(1234)); return 0; }\n",
+    );
+
+    assert_eq!(output, "1234\n");
+}
+
+/// A `char` slot round-trips through the byte instructions, sign-extending on the way back.
+#[test]
+fn a_char_slot_sign_extends_when_it_is_read_back() {
+    let frame = Frame {
+        slots: vec![local(0, "letter", 1, 1)],
+    };
+    let layout = FrameLayout::build(&frame, 0);
+    let letter = layout.offset_of(SlotId(0)).expect("the slot is laid out");
+
+    let mut emitter = Emitter::new();
+    emitter.begin_function("round_trip");
+    layout.emit_prologue(&mut emitter, &[]);
+    emitter.store_to_frame("w0", Width::Byte, letter);
+    emitter.load_from_frame("w0", Width::Byte, letter);
+    layout.emit_epilogue(&mut emitter);
+
+    let output = run_with_driver(
+        "char-slot",
+        &emitter.finish(),
+        "#include <stdio.h>\nint round_trip(int n);\nint main(void) { printf(\"%d %d\\n\", round_trip(65), round_trip(200)); return 0; }\n",
+    );
+
+    // 200 does not fit a signed byte; reading it back sign-extends to -56, which is what C says a
+    // `char` holding that value is worth.
+    assert_eq!(output, "65 -56\n");
+}
+
+/// Parameters arrive in registers and are readable from their slots once the prologue has run.
+#[test]
+fn parameters_are_readable_from_their_slots_after_the_prologue() {
+    let frame = Frame {
+        slots: vec![
+            FrameSlot {
+                slot: SlotId(0),
+                name: "a".to_owned(),
+                ty: Ty::Int,
+                size: 4,
+                align: 4,
+                kind: SymbolKind::Parameter(0),
+            },
+            FrameSlot {
+                slot: SlotId(1),
+                name: "b".to_owned(),
+                ty: Ty::Int,
+                size: 4,
+                align: 4,
+                kind: SymbolKind::Parameter(1),
+            },
+        ],
+    };
+    let layout = FrameLayout::build(&frame, 0);
+    let a = layout.offset_of(SlotId(0)).expect("a is laid out");
+    let b = layout.offset_of(SlotId(1)).expect("b is laid out");
+
+    let mut emitter = Emitter::new();
+    emitter.begin_function("difference");
+    layout.emit_prologue(&mut emitter, &frame.slots);
+    emitter.load_from_frame("w0", Width::Word, a);
+    emitter.load_from_frame("w1", Width::Word, b);
+    emitter.instruction("sub w0, w0, w1");
+    layout.emit_epilogue(&mut emitter);
+
+    let output = run_with_driver(
+        "parameters",
+        &emitter.finish(),
+        "#include <stdio.h>\nint difference(int a, int b);\nint main(void) { printf(\"%d\\n\", difference(10, 3)); return 0; }\n",
+    );
+
+    // Asymmetric on purpose: a transposed load would give -7 and pass on any symmetric pair.
+    assert_eq!(output, "7\n");
 }

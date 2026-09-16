@@ -19,6 +19,67 @@ use std::fmt::Write as _;
 /// The indent every directive and instruction inside a section carries.
 const INDENT: &str = "\t";
 
+/// The scratch register used to hold an address or a size that no immediate field can carry.
+///
+/// `x9` is caller-saved and is not an argument register, so nothing of value is ever in it across
+/// the two instructions that use it. Reserving one register by name, in one place, is what keeps
+/// the materialization paths from having to agree with each other.
+pub const SCRATCH: &str = "x9";
+
+/// The width of a memory access, which fixes both the instruction and the offsets it can reach.
+///
+/// The ranges are not from memory. Each was put to `clang -c`: a word load reaches 16380 and must
+/// be a multiple of four, a byte load reaches 4095 with no such rule, and a doubleword reaches
+/// 32760 in multiples of eight. Past those the assembler rejects the instruction outright, which is
+/// the good case — it is [`Width::reaches`] that keeps a too-large offset from ever being written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Width {
+    /// One byte, for a `char`.
+    Byte,
+    /// Four bytes, for an `int`.
+    Word,
+    /// Eight bytes, for a pointer or a saved register.
+    Double,
+}
+
+impl Width {
+    /// The instruction that loads this width, sign-extending where the width is narrower than a
+    /// register.
+    ///
+    /// `ldrsb` sign-extends on the way in, which is what makes C's rule that a `char` promotes to
+    /// an `int` fall out with no extra instruction.
+    pub fn load(self) -> &'static str {
+        match self {
+            Width::Byte => "ldrsb",
+            Width::Word | Width::Double => "ldr",
+        }
+    }
+
+    /// The instruction that stores this width.
+    pub fn store(self) -> &'static str {
+        match self {
+            Width::Byte => "strb",
+            Width::Word | Width::Double => "str",
+        }
+    }
+
+    /// The largest offset this width can carry in an instruction, and the step it must land on.
+    fn limits(self) -> (u64, u64) {
+        match self {
+            Width::Byte => (4095, 1),
+            Width::Word => (16380, 4),
+            Width::Double => (32760, 8),
+        }
+    }
+
+    /// Whether `offset` fits this width's immediate field.
+    pub fn reaches(self, offset: u64) -> bool {
+        let (largest, step) = self.limits();
+
+        offset <= largest && offset.is_multiple_of(step)
+    }
+}
+
 /// One of the four sections this compiler emits into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
@@ -142,6 +203,52 @@ impl Emitter {
     pub fn address_of(&mut self, register: &str, symbol: &str) {
         self.instruction(&format!("adrp {register}, {symbol}@PAGE"));
         self.instruction(&format!("add {register}, {register}, {symbol}@PAGEOFF"));
+    }
+
+    /// Puts the literal `value` into `register`.
+    ///
+    /// `mov` with a wide immediate only accepts what fits sixteen bits, so anything larger is built
+    /// in sixteen-bit pieces: `movz` writes the lowest and zeroes the rest, and each `movk` writes
+    /// one more piece without disturbing what is already there.
+    pub fn load_immediate(&mut self, register: &str, value: u64) {
+        self.instruction(&format!("movz {register}, #{}", value & 0xffff));
+
+        for shift in [16, 32, 48] {
+            let piece = (value >> shift) & 0xffff;
+            if piece != 0 {
+                self.instruction(&format!("movk {register}, #{piece}, lsl #{shift}"));
+            }
+        }
+    }
+
+    /// Loads `register` from `offset` bytes into the current frame.
+    pub fn load_from_frame(&mut self, register: &str, width: Width, offset: u64) {
+        let instruction = width.load();
+        self.frame_access(instruction, register, width, offset);
+    }
+
+    /// Stores `register` at `offset` bytes into the current frame.
+    pub fn store_to_frame(&mut self, register: &str, width: Width, offset: u64) {
+        let instruction = width.store();
+        self.frame_access(instruction, register, width, offset);
+    }
+
+    /// One frame load or store, reaching `offset` however far away it is.
+    ///
+    /// An offset the instruction's immediate field cannot hold is computed into [`SCRATCH`] and the
+    /// access goes through that instead. The alternative — letting the assembler see an offset it
+    /// cannot encode — is at least an error rather than a wrong answer, but a function with enough
+    /// locals is not a program this compiler should refuse.
+    fn frame_access(&mut self, instruction: &str, register: &str, width: Width, offset: u64) {
+        if width.reaches(offset) {
+            self.instruction(&format!("{instruction} {register}, [x29, #{offset}]"));
+
+            return;
+        }
+
+        self.load_immediate(SCRATCH, offset);
+        self.instruction(&format!("add {SCRATCH}, x29, {SCRATCH}"));
+        self.instruction(&format!("{instruction} {register}, [{SCRATCH}]"));
     }
 
     /// Defines a global four-byte word holding `value`.
