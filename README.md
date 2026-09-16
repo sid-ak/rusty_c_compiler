@@ -136,7 +136,7 @@ Excludes, each reported by name:
 - The conditional operator
 - Compound assignment
 - Bitwise operators
- -Floating point
+- Floating point
 - Multi-dimensional arrays
 - Pointer variables, `&`, `*`
 - Variadic functions
