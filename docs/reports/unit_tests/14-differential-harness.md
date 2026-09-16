@@ -10,15 +10,15 @@ it is the thing everything else is measured against.
 
 It does four things:
 
-- **Builds a program twice**, once with `rustycc` and once with `clang -O0 -std=c99 -Wall`, linking
+- Builds a program twice, once with `rustycc` and once with `clang -O0 -std=c99 -Wall`, linking
   both against the same runtime object so the comparison is between two compilers and not between
   two runtimes.
-- **Runs both**, with no arguments, with empty input, and with a wall-clock limit, capturing what
+- Runs both, with no arguments, with empty input, and with a wall-clock limit, capturing what
   each wrote and how each ended.
-- **Compares the two runs** on what they printed, what they wrote to standard error, and how they
+- Compares the two runs on what they printed, what they wrote to standard error, and how they
   exited — with death by signal kept distinct from a numeric exit status, and a program that never
   finished kept distinct from both.
-- **Generates programs**, from a seed, that are well-typed subset C and stay inside the behavior C
+- Generates programs, from a seed, that are well-typed subset C and stay inside the behavior C
   actually defines.
 
 ## Date
@@ -31,23 +31,23 @@ Sidharth Anandkumar (sole engineer)
 
 ## Test Methodology
 
-**Approach: fault injection on every comparison axis, plus end-to-end provocation of each outcome
-the harness is supposed to distinguish.**
+Approach: fault injection on every comparison axis, plus end-to-end provocation of each outcome
+the harness is supposed to distinguish.
 
 The governing idea is that a test harness that has only ever seen agreement has never been shown to
 notice anything. A harness that returned "passed" unconditionally would produce exactly the output
 this project's suite produces on a good day.
 
-1. **The comparison is a pure function, deliberately.** Running a program and comparing two runs are
+1. The comparison is a pure function, deliberately. Running a program and comparing two runs are
    separate pieces of code, so the tests can hand the comparison two records of a run directly, with
    no compiler and no process involved. Each axis then gets a wrong answer on purpose, and the test
    asserts both that a mismatch was reported and that it was reported as the *right* axis.
 
-2. **The cheap wrong answer is tested too.** A difference of one trailing newline, and nothing else,
+2. The cheap wrong answer is tested too. A difference of one trailing newline, and nothing else,
    must count. A harness that trimmed whitespace before comparing would pass every other test here
    and then miss a missing newline in every program in the corpus for the rest of the project.
 
-3. **Each distinguishable outcome is provoked for real.** Two fixtures that differ only in what they
+3. Each distinguishable outcome is provoked for real. Two fixtures that differ only in what they
    print, built and linked and run, so the path between a program printing something and the harness
    reading it is covered and not only the comparison. A program returning `300`, confirming it is
    observed as `44` on both sides. A program that never finishes, killed and reported as a timeout
@@ -55,17 +55,17 @@ this project's suite produces on a good day.
    subset — confirming a signal death is read as one. A program `rustycc` rejects, and a file that is
    not C at all, each attributed to the right compiler.
 
-4. **The report is asserted on, not just the verdict.** A failure that cannot be acted on without
+4. The report is asserted on, not just the verdict. A failure that cannot be acted on without
    first reproducing it is most of the way to no report. The tests check that a mismatch report names
    the program, both answers, and the directory holding both binaries and the emitted assembly — and
    that the assembly it points at is actually on disk.
 
-5. **The generator is held to its own guarantee by a third party.** Its claim is that it never emits
+5. The generator is held to its own guarantee by a third party. Its claim is that it never emits
    undefined behavior. That claim is a chain of reasoning about interval arithmetic, and chains of
    reasoning are sometimes wrong, so a sample of its programs is compiled with `clang`'s
    undefined-behavior sanitizer and run. Finding nothing is the check on the reasoning.
 
-6. **Reproducibility is tested in both directions.** A seed must produce the same program twice —
+6. Reproducibility is tested in both directions. A seed must produce the same program twice —
    everything else rests on that, because a printed seed is worthless if it does not reproduce. And
    different seeds must produce different programs, because a generator that ignored its seed would
    pass the first test perfectly.

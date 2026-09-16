@@ -27,28 +27,28 @@ Sidharth Anandkumar (sole engineer)
 
 ## Test Methodology
 
-**Approach: state-transition testing over the stack's operations, with shadowing and redeclaration
-treated as the two boundaries that matter.**
+Approach: state-transition testing over the stack's operations, with shadowing and redeclaration
+treated as the two boundaries that matter.
 
 A scope stack is a small state machine: push a scope, declare names into it, look names up, pop the
 scope. Almost every defect in one is a transition that does not restore what it should, so the tests
 are organized around transitions rather than around single operations:
 
-1. **Nesting and unnesting, checked by what survives.** A name declared in an inner scope must be
+1. Nesting and unnesting, checked by what survives. A name declared in an inner scope must be
    invisible after that scope is popped, and a name declared in an outer scope must still resolve to
    the same declaration it did before the inner scope was pushed. The second half is the one that
    catches a stack that pops too much.
 
-2. **Shadowing, in both directions.** An inner declaration of an existing name must hide the outer
+2. Shadowing, in both directions. An inner declaration of an existing name must hide the outer
    one for exactly as long as the inner scope lasts — and the outer one must come back unchanged,
    not merely come back. Tests assert *which* declaration was found, not only that one was, which is
    why the fixtures give each declaration a distinguishable position.
 
-3. **Redeclaration as the negative space.** Declaring the same name twice in one scope must be
+3. Redeclaration as the negative space. Declaring the same name twice in one scope must be
    refused; declaring it again in a nested scope must not be. These are one line apart in the
    implementation and opposite in meaning.
 
-4. **Slot numbering as an invariant, not an example.** Every slot handed out must be distinct, and
+4. Slot numbering as an invariant, not an example. Every slot handed out must be distinct, and
    the count must match what the function actually needs. A test that checked only that slots exist
    would pass against an implementation that handed the same slot to two variables — which is a bug
    that produces a program that compiles, links, runs, and gives the wrong answer.

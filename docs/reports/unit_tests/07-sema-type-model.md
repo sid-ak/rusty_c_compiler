@@ -7,13 +7,13 @@ Source under test: `src/sema/types.rs`.
 This unit is the compiler's model of what a value *is*. It knows four things, and nothing else in
 the compiler is allowed to know them independently:
 
-- **How big a value is, and how it has to be aligned in memory.** An `int` is four bytes, a `char` is
+- How big a value is, and how it has to be aligned in memory. An `int` is four bytes, a `char` is
   one, an array is its element size times its length.
-- **Promotion.** C says a `char` behaves as an `int` the moment it takes part in arithmetic, a
+- Promotion. C says a `char` behaves as an `int` the moment it takes part in arithmetic, a
   comparison, or a logical operator. Storage is one byte; computation is 32-bit.
-- **Decay.** An array becomes the address of its first element — but in this subset that happens at
+- Decay. An array becomes the address of its first element — but in this subset that happens at
   exactly one place, the argument position of a call, and nowhere else.
-- **Compatibility.** Whether a value of one type may be assigned to, returned as, or passed as
+- Compatibility. Whether a value of one type may be assigned to, returned as, or passed as
   another.
 
 It is deliberately the bottom of the dependency graph: it does not know about scopes, about the
@@ -29,8 +29,8 @@ Sidharth Anandkumar (sole engineer)
 
 ## Test Methodology
 
-**Approach: exhaustive matrix testing over every pair of types, with the axis of the matrix built
-from a list the compiler itself refuses to let go stale.**
+Approach: exhaustive matrix testing over every pair of types, with the axis of the matrix built
+from a list the compiler itself refuses to let go stale.
 
 The rules this unit implements are not single cases, they are *tables*. "Is this assignable to that"
 has an answer for every pair of types, and the interesting answers are the ones nobody would think
@@ -40,22 +40,22 @@ a `char`. Sampling such a table is how a wrong cell survives.
 So most tests here enumerate the whole matrix rather than picking from it, and the interesting
 design is in how the axis is kept honest:
 
-1. **The axis is a list of one value of every type the compiler has** — and a separate test matches
+1. The axis is a list of one value of every type the compiler has — and a separate test matches
    that list against an exhaustive `match` with no catch-all arm. Adding a new type without adding
    it to the list is then a *compile error*, not a silently smaller matrix. This matters more than
    it sounds: an omitted row does not fail any matrix test, it simply stops being checked, and
    nothing about the test output would look different.
 
-2. **Each rule is checked in both directions.** A compatibility rule tested only where it says "yes"
+2. Each rule is checked in both directions. A compatibility rule tested only where it says "yes"
    passes just as well if it says yes to everything. Every matrix test asserts the cells that must
    be false as firmly as the ones that must be true.
 
-3. **Properties, not only examples, where the rule is a property.** Promotion is idempotent —
+3. Properties, not only examples, where the rule is a property. Promotion is idempotent —
    promoting an already-promoted type changes nothing — and that is asserted over the whole axis
    rather than for one type, because it is the kind of rule an implementation gets right for the
    case it was written against and wrong for the one it was not.
 
-4. **Public entry points are tested with inputs the rest of the compiler never produces.** This unit
+4. Public entry points are tested with inputs the rest of the compiler never produces. This unit
    is reachable from anywhere in the crate, so a function that would be correct for every input the
    analyzer actually sends it is still a latent bug. Deeply nested and malformed type values are
    passed in deliberately.

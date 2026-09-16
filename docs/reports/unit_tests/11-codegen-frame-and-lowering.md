@@ -8,12 +8,12 @@ Source under test: `src/codegen/frame.rs`, `src/codegen/expr.rs`, `src/codegen/s
 This is the unit that turns an analyzed program into instructions. It has two halves that have to
 agree with each other exactly:
 
-- **The frame.** Each function gets a region of the stack — a *frame* — and every variable and every
+- The frame. Each function gets a region of the stack — a *frame* — and every variable and every
   intermediate value in it is given a fixed place there. This compiler deliberately does not attempt
   register allocation: a value lives in memory and is pulled into a register only for the instant it
   is used. That trades speed for the removal of an entire category of bug, and it means the frame
   layout arithmetic is the thing that has to be right.
-- **The lowering.** Expressions become instructions that read their operands in source order;
+- The lowering. Expressions become instructions that read their operands in source order;
   statements become branches and labels; calls place their arguments where the platform's calling
   convention says they go.
 
@@ -32,29 +32,29 @@ Sidharth Anandkumar (sole engineer)
 
 ## Test Methodology
 
-**Approach: arithmetic tested as arithmetic at the unit level, and behavior tested by running the
-program at the integration level, with operands chosen so that a wrong answer is a different answer.**
+Approach: arithmetic tested as arithmetic at the unit level, and behavior tested by running the
+program at the integration level, with operands chosen so that a wrong answer is a different answer.
 
-1. **Frame layout is checked by computing it.** Offsets, sizes, alignment, and the total frame size
+1. Frame layout is checked by computing it. Offsets, sizes, alignment, and the total frame size
    are numbers, and are asserted as numbers — including at the boundaries where the platform's rules
    change, such as a frame large enough that the instruction which reserves it can no longer encode
    its own size.
 
-2. **Everything else is checked by running the program.** A snapshot says what was emitted, and an
+2. Everything else is checked by running the program. A snapshot says what was emitted, and an
    assembler says it is legal, but only running the program says the answer is right. So the bulk of
    this unit's coverage is small C programs compiled, linked, executed, and compared against what
    they should print.
 
-3. **Non-commutative operators get asymmetric operands, always.** `2 - 2` is `0` whichever way round
+3. Non-commutative operators get asymmetric operands, always. `2 - 2` is `0` whichever way round
    the lowering reads its operands, so a compiler with them transposed passes it. `10 - 3` is `7`
    one way and `-7` the other. Every subtraction, division, remainder, and comparison in this unit's
    tests is written to tell the difference.
 
-4. **Each behavior gets its own program.** A single large program exercising twenty features reports
+4. Each behavior gets its own program. A single large program exercising twenty features reports
    one failure whichever of the twenty broke. The integration tests are roughly two hundred small
    programs, each about one thing, so a failure names the construct rather than the file.
 
-5. **The cases that fail as a crash rather than as a wrong number are singled out.** A `continue` in
+5. The cases that fail as a crash rather than as a wrong number are singled out. A `continue` in
    a `for` loop that jumps to the condition instead of the step produces a loop that never advances —
    a hang, not a wrong answer — so there is a test whose loop terminates only if the step runs. A
    mis-sized pointer produces garbage rather than an off-by-one, so there is a test for each shape

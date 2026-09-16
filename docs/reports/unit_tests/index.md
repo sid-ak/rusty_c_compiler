@@ -11,14 +11,14 @@ once you know what is being defended.
 
 Every report has the same shape:
 
-- **Unit** — what this piece of the compiler is, what it owns, and what it deliberately does not
+- Unit — what this piece of the compiler is, what it owns, and what it deliberately does not
   know about.
-- **Test Methodology** — the techniques used, and the reasoning for choosing them over the
+- Test Methodology — the techniques used, and the reasoning for choosing them over the
   alternatives. This is the part worth reading; the rest is bookkeeping.
-- **Test Coverage** — what is covered, and the gaps that are deliberate, with the reason each one
+- Test Coverage — what is covered, and the gaps that are deliberate, with the reason each one
   belongs to a different unit's report.
-- **Automated Test Code** — every test in the unit, with the behavior it pins.
-- **Actual Outputs** — the result, and where the unedited evidence for it is checked in.
+- Automated Test Code — every test in the unit, with the behavior it pins.
+- Actual Outputs — the result, and where the unedited evidence for it is checked in.
 
 ## A note on the tables
 

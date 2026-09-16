@@ -48,7 +48,7 @@ This phase replaces the comment with the thing that produced it.
 
 ## Overview
 
-The idea is called **differential testing**, and it is the reason this project compiles C rather
+The idea is called differential testing, and it is the reason this project compiles C rather
 than a language invented for the purpose. A language nobody else implements has no second opinion
 available: whatever the compiler produces is, by default, the answer. C has dozens of
 implementations, one of which is already installed on the machine — so any program written in it can
@@ -68,13 +68,13 @@ that was written last month by one person.
 
 Four pieces make that work, and this phase built all four:
 
-- A **harness** that does the building, running, and comparing, and reports a disagreement in enough
+- A harness that does the building, running, and comparing, and reports a disagreement in enough
   detail to act on.
-- A **corpus** wide enough that agreement means something — sixty-four programs, covering every
+- A corpus wide enough that agreement means something — sixty-four programs, covering every
   feature in the grammar and every pair of features that has to agree about something.
-- A **generator** that writes more programs, in shapes nobody would choose, and puts them through the
+- A generator that writes more programs, in shapes nobody would choose, and puts them through the
   same comparison.
-- **Fuzzing**, which asks a different question entirely: not "is the answer right" but "does the
+- Fuzzing, which asks a different question entirely: not "is the answer right" but "does the
   compiler survive input that is not a program at all".
 
 ## Components
@@ -85,12 +85,12 @@ Testing anything requires knowing the right answer. For most software that means
 down; for a compiler it is worse than usual, because the right answer is not a value but a *program's
 behavior*, and working it out by hand means being a compiler.
 
-An **oracle**, in testing, is anything that can tell you the right answer without you having to work
+An oracle, in testing, is anything that can tell you the right answer without you having to work
 it out. `clang` is this project's oracle, and the whole design leans on it — but only for programs
 where the right answer exists.
 
 That last clause is the catch, and it shapes everything below. C does not define what every program
-does. Some programs it deliberately leaves **undefined**: dividing by zero, an arithmetic result too
+does. Some programs it deliberately leaves undefined: dividing by zero, an arithmetic result too
 large to store, reading past the end of an array, reading a variable that was never assigned. For
 those, a compiler may do anything at all, and two compilers doing different things is not evidence
 of a bug in either one. Worse, two compilers doing the *same* thing is not evidence of correctness
@@ -124,19 +124,19 @@ something is actually wrong — from arriving unnoticed among the ones that were
 `tests/harness/` is the shared plumbing and `tests/differential.rs` is the suite built on it. The
 interesting decisions are about failure rather than success.
 
-**One test per program.** Rust needs its test functions to exist at compile time, so a corpus
+One test per program. Rust needs its test functions to exist at compile time, so a corpus
 discovered from a directory cannot simply become a list of tests. The list is generated instead:
 `build.rs` reads `tests/programs/`, writes out a macro naming every `.c` file in it, and both the
 differential suite and the golden suite expand that macro into one `#[test]` each. Nobody maintains
 a list, so nobody can forget to add to it — which was the one way a program could be added to the
 corpus and silently never run.
 
-**Comparing is separate from running.** The comparison is a plain function over two records of a
+Comparing is separate from running. The comparison is a plain function over two records of a
 run — what each printed, what each wrote to standard error, how each ended — with no compiler and no
 process behind it. That split exists entirely so the harness can be handed a wrong answer on
 purpose, which is the next section.
 
-**Three outcomes, not two.** A naive harness has "passed" and "failed". This one distinguishes:
+Three outcomes, not two. A naive harness has "passed" and "failed". This one distinguishes:
 
 - The two binaries behaved differently. That is a compiler bug until proven otherwise.
 - One compiler would not build the program at all. If it was `rustycc`, that is a hole in the
@@ -147,12 +147,12 @@ purpose, which is the next section.
   programs that both ran forever almost always differ on their output too. The first version of the
   harness reported that as "stdout differs", which was true and completely misleading.
 
-**Output goes to files, not pipes.** A pipe has a fixed-size buffer. When it fills, the program
+Output goes to files, not pipes. A pipe has a fixed-size buffer. When it fills, the program
 writing to it stops until somebody reads — and a parent process that is waiting for the program to
 finish before it reads will wait forever. That turns a chatty test program into a hang that looks
 exactly like a compiler emitting a broken loop. Writing to a file has no buffer to fill.
 
-**A failure names a directory.** The message carries the program, the disagreement, and the path to a
+A failure names a directory. The message carries the program, the disagreement, and the path to a
 directory holding both binaries, both captures of their output, and the assembly `rustycc` produced.
 A failure that can only be investigated by first reproducing it is most of the way to no report at
 all.
@@ -186,10 +186,10 @@ So `tests/harness_self_tests.rs` breaks it on purpose, one way at a time:
 
 Seven programs became sixty-four. The target was not the number; it was two properties:
 
-- Every feature in the grammar appears in at least **three** programs, so no feature rests on one
+- Every feature in the grammar appears in at least three programs, so no feature rests on one
   file continuing to exist.
 - Every pair of features that has to agree about something — a storage width, a register, an order
-  of evaluation — appears together in at least **one**. Recursion with arrays. `char` with promotion
+  of evaluation — appears together in at least one. Recursion with arrays. `char` with promotion
   and comparison. Arrays across a function boundary with in-place mutation. Short-circuiting with
   side effects. Globals reached from inside a recursion.
 
@@ -199,12 +199,12 @@ and become a file.
 
 Two habits run through the programs themselves:
 
-**A wrong answer should be a different answer.** `2 - 2` is `0` whichever way round a subtraction
+A wrong answer should be a different answer. `2 - 2` is `0` whichever way round a subtraction
 reads its operands, so a compiler that has them backwards passes it. Every non-commutative operator
 in the corpus gets asymmetric operands for that reason. The same logic applies to grouping:
 `100 - 30 - 20` and `100 - (30 - 20)` differ, so both are written out.
 
-**Where an algorithm can be written twice, it is.** Greatest common divisor, binary search,
+Where an algorithm can be written twice, it is. Greatest common divisor, binary search,
 factorial, primality — each appears as a loop and as a recursion, and the two are checked against
 each other across a whole range of inputs rather than each against one recorded value. Two different
 pieces of code reaching the same answer is a stronger statement than one piece agreeing with itself.
@@ -220,8 +220,8 @@ C says that when an array is initialized with fewer values than it has elements,
 int a[4] = {5};   /* a[1], a[2] and a[3] are 0 */
 ```
 
-For a **global**, that falls out of how globals are stored: they live in a region of the executable
-that starts out zero, so writing `5` into the first slot is the whole job. For a **local**, the
+For a global, that falls out of how globals are stored: they live in a region of the executable
+that starts out zero, so writing `5` into the first slot is the whole job. For a local, the
 storage is a piece of the function's stack frame — memory that was last used by whatever function
 ran before this one, holding whatever that function left in it. The zeros have to be written, or
 they are not there.
@@ -236,12 +236,12 @@ where `clang` printed `700`.
 
 Three things about this are worth more than the fix:
 
-- **Every existing test passed.** Every one of them read back an element the initializer had
+- Every existing test passed. Every one of them read back an element the initializer had
   actually mentioned. The bug lived entirely in the elements nobody had thought to look at.
-- **The comment was already right.** The code path that copies a string literal into a `char` array
+- The comment was already right. The code path that copies a string literal into a `char` array
   did zero its tail, and its comment said it was doing "the same as a short brace list" — which the
   short brace list was not doing. Both now call one helper, so the two cannot disagree again.
-- **The first test written for the fix passed against the broken compiler.** It summed all four
+- The first test written for the fix passed against the broken compiler. It summed all four
   elements, and the stack leftovers in that particular frame happened to cancel to zero. An
   aggregate — a sum, a count, a "contains" — cannot detect an omission it happens to balance. The
   test that stuck checks the untouched elements individually.
@@ -250,7 +250,7 @@ Three things about this are worth more than the fix:
 
 A hand-written corpus plateaus. Every program in it was written by someone who already had a theory
 about what might be broken, so it finds the bugs that fit a theory and then stops finding anything.
-This is a known enough phenomenon to have a name — the **pesticide paradox** — and the answer is to
+This is a known enough phenomenon to have a name — the pesticide paradox — and the answer is to
 generate programs nobody chose.
 
 `tests/generator/` writes random subset C from a seed. The hard part is not producing C; it is
@@ -258,9 +258,9 @@ producing C with a right answer, because of the oracle problem above. A generato
 overflowing multiplication once every few hundred programs would produce a suite that failed
 occasionally for no reason anybody could act on, which is worse than no suite.
 
-So undefined behavior is ruled out **by construction**, not by filtering afterwards:
+So undefined behavior is ruled out by construction, not by filtering afterwards:
 
-- Every expression is built together with the **interval of values it can take**, computed in 64-bit
+- Every expression is built together with the interval of values it can take, computed in 64-bit
   arithmetic. `a * b` where `a` is known to be in `[-1000, 1000]` and `b` in `[-64, 64]` produces an
   interval of `[-64000, 64000]`. An operator is emitted only if its interval still fits in a 32-bit
   `int`, so overflow cannot happen rather than being unlikely.
@@ -324,7 +324,7 @@ something else: what happens when the input is not a program.
 
 A compiler is handed files by people, and people hand it broken ones constantly — a missing brace, a
 half-finished line, occasionally a file that is not source code at all. The rule this project holds
-to is that **no pass may panic on user input**: whatever arrives, the compiler either compiles it or
+to is that no pass may panic on user input: whatever arrives, the compiler either compiles it or
 explains what is wrong with it. Crashing is not an acceptable third option, because a crash tells
 the user nothing and, in a compiler that ran on untrusted input, would be a security problem.
 
@@ -344,7 +344,7 @@ end in an end-of-file token and every span must point inside the input. A tree m
 must be either accepted or reported on, never neither.
 
 The failure mode fuzzing finds in a recursive-descent parser is not usually a wrong tree — it is a
-**stack overflow**. Ten thousand nested parentheses cost ten thousand nested function calls, and a
+stack overflow. Ten thousand nested parentheses cost ten thousand nested function calls, and a
 stack is finite. That was anticipated rather than discovered: the parser carries a depth limit that
 turns deep nesting into an ordinary diagnostic, and semantic analysis carries its own, because it
 walks the same tree a second time.
@@ -370,32 +370,32 @@ rather than a memory.
 
 ## Learnings
 
-**A test that cannot fail is not a test.** This applies most sharply to the thing everything else is
+A test that cannot fail is not a test. This applies most sharply to the thing everything else is
 measured against. The comparison function was split out from the running specifically so a wrong
 answer could be handed to it, and the first three self-tests written that way each found a real gap
 in what it checked.
 
-**An aggregate assertion cannot detect an omission.** A sum, a count, a "contains" — each can be
+An aggregate assertion cannot detect an omission. A sum, a count, a "contains" — each can be
 satisfied by the wrong values as easily as the right ones. The first test for the zero-fill bug
 summed four array elements and passed against the broken compiler because the leftovers cancelled.
 Assert over each case, not over a fold of them.
 
-**Two compilers agreeing about an undefined program proves nothing.** This is the one constraint
+Two compilers agreeing about an undefined program proves nothing. This is the one constraint
 that shapes the whole phase: the corpus, the generator's interval arithmetic, and the decision to
 check what `clang` warns about rather than only whether it succeeds. An oracle is only an oracle
 where an answer exists.
 
-**Reason about cost the way you reason about values.** The generator's interval arithmetic made its
+Reason about cost the way you reason about values. The generator's interval arithmetic made its
 programs *correct*; nothing made them *finish*. Both are properties of a generated program that a
 test depends on, and only one of them had been thought about — which is why three programs in two
 and a half thousand were useless as tests and looked like compiler bugs.
 
-**Say which thing went wrong, not that something did.** A mismatch, a program one compiler would not
+Say which thing went wrong, not that something did. A mismatch, a program one compiler would not
 build, and a program that never finished are three different situations with three different next
 steps. The first version of the harness collapsed the third into the first, and the resulting message
 was true, unhelpful, and actively misleading about where to look.
 
-**Generating a list beats maintaining one.** The corpus listing comes out of `build.rs` reading the
+Generating a list beats maintaining one. The corpus listing comes out of `build.rs` reading the
 directory. There is no list to forget to add to, which removes a failure mode rather than testing
 for it.
 

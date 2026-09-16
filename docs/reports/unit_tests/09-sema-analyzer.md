@@ -12,11 +12,11 @@ takes two arguments, is this unit's problem.
 
 It does two things at once:
 
-- **Rejects.** Thirty-one distinct checks, each with its own message and its own position in the
+- Rejects. Thirty-one distinct checks, each with its own message and its own position in the
   source: an undeclared name, a call with the wrong number of arguments, `break` outside a loop, a
   value-returning function whose control flow can reach its closing brace, an array used where a
   number belongs.
-- **Records.** For every node in the tree, it writes down what the code generator will need and
+- Records. For every node in the tree, it writes down what the code generator will need and
   would otherwise have to work out again: the type of every expression, the declaration every name
   refers to, the implicit conversions C requires, what storage each function needs, and one label
   per distinct string literal.
@@ -35,33 +35,33 @@ Sidharth Anandkumar (sole engineer)
 
 ## Test Methodology
 
-**Approach: a rejection fixture per rule at the integration level, structural tests on the walk
-itself at the unit level, and snapshots of the recorded annotations.**
+Approach: a rejection fixture per rule at the integration level, structural tests on the walk
+itself at the unit level, and snapshots of the recorded annotations.
 
 The three layers exist because the unit does three separable things, and testing them together would
 make every failure ambiguous.
 
-1. **One rejected program per rule, as a file.** `tests/programs/invalid/` holds a small C program
+1. One rejected program per rule, as a file. `tests/programs/invalid/` holds a small C program
    for each of the thirty-one checks, each naming in its own header the rule it violates. The test
    asserts the specific message and the specific position, not merely that something was rejected —
    a test that only checks for rejection passes against a compiler that rejects for the wrong
    reason, which is a worse failure than accepting, because the message sends the reader to the
    wrong line.
 
-2. **`clang` is consulted about every one of them.** For each invalid program the suite also records
+2. `clang` is consulted about every one of them. For each invalid program the suite also records
    what `clang` does with it. Almost all are rejected by both; four are real C that `clang` builds
    and this compiler turns down on purpose, and those four are listed in the architecture document.
    A test fails if the list and the corpus ever disagree — which is the mechanism that keeps a
    deliberate restriction from being indistinguishable from a bug.
 
-3. **The walk is tested structurally, apart from the rules.** That the second pass sees what the
+3. The walk is tested structurally, apart from the rules. That the second pass sees what the
    first one collected; that one error does not stop the walk, so a file with four mistakes reports
    four; that no tree, however it was built, can drive the walk off the stack. This last one is
    tested by constructing a tree far deeper than any parser would produce and handing it in
    directly — the analyzer is a public entry point, and testing it only with trees the parser
    actually emits would leave its own depth guard unexercised.
 
-4. **The annotations are snapshotted.** What this pass records is a large structured object, and the
+4. The annotations are snapshotted. What this pass records is a large structured object, and the
    only practical way to notice an unintended change in it is to compare the whole thing against a
    checked-in copy. The snapshots cover every program in the corpus.
 

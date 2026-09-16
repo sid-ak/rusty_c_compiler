@@ -7,16 +7,16 @@ Source under test: `src/codegen/emit.rs`, with `tests/codegen_snapshots.rs` at t
 This unit is the part of the code generator that knows about *assembly as a document* rather than
 about C. It owns:
 
-- **Sections.** A finished assembly file is divided into regions: executable instructions in one,
+- Sections. A finished assembly file is divided into regions: executable instructions in one,
   read-only data such as string literals in another, initialized globals in a third, and
   zero-initialized globals in a fourth. Instructions arrive in the order they were generated, but
   sections have to come out grouped.
-- **Symbol naming.** A C function called `main` is a symbol called `_main` in a Mach-O object file.
+- Symbol naming. A C function called `main` is a symbol called `_main` in a Mach-O object file.
   That leading underscore is a platform convention, and it lives here so that nothing else has to
   remember it.
-- **Labels.** Every branch needs a destination, and every destination needs a name nothing else
+- Labels. Every branch needs a destination, and every destination needs a name nothing else
   uses. The emitter hands those out.
-- **Alignment and directives.** The assembler needs to be told how to align each section and what
+- Alignment and directives. The assembler needs to be told how to align each section and what
   kind of thing each symbol is.
 
 Nothing in this unit runs an assembler. Whether the text is something `clang` accepts is an
@@ -33,23 +33,23 @@ Sidharth Anandkumar (sole engineer)
 
 ## Test Methodology
 
-**Approach: golden-string assertions on the emitted text, uniqueness properties for the generated
-names, and a separate integration test that hands the output to a real assembler.**
+Approach: golden-string assertions on the emitted text, uniqueness properties for the generated
+names, and a separate integration test that hands the output to a real assembler.
 
-1. **The exact text, not a substring of it.** The emitter's whole job is to produce a specific
+1. The exact text, not a substring of it. The emitter's whole job is to produce a specific
    document, so tests assert the whole document for a small input rather than checking that it
    contains particular lines. A "contains" assertion on generated code is satisfied by output that
    also contains something disastrous.
 
-2. **Uniqueness as a property.** Labels must never repeat within a function — two branches sharing a
+2. Uniqueness as a property. Labels must never repeat within a function — two branches sharing a
    destination is a program that jumps to the wrong place — so the test generates many and asserts
    they are pairwise distinct, rather than generating two and comparing them.
 
-3. **Section grouping tested by interleaving.** The tests deliberately emit into several sections in
+3. Section grouping tested by interleaving. The tests deliberately emit into several sections in
    an order that is not the order they must appear in the output. An implementation that simply
    appended everything would pass a test that wrote the sections in their final order anyway.
 
-4. **The assembler as the judge, once.** `tests/codegen_snapshots.rs` takes emitted output and runs
+4. The assembler as the judge, once. `tests/codegen_snapshots.rs` takes emitted output and runs
    the real assembler over it with warnings treated as errors. This is the test that would catch a
    directive that is well-formed as text and meaningless as assembly — something no amount of string
    comparison can notice.
