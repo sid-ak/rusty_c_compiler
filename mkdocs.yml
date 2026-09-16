@@ -33,6 +33,7 @@ nav:
       - Overview: explanations/index.md
       - Phase 1 — Foundation, diagnostics, and the lexer: explanations/Phase-1-Explanation.md
       - Phase 2 — The AST and the parser: explanations/Phase-2-Explanation.md
+      - Phase 3 — Semantic analysis: explanations/Phase-3-Explanation.md
   - Cheatsheet: CHEATSHEET.md
   - API Reference: api.md
   - Pragmatic Testing: PRAGMATIC_TESTING.md
@@ -48,6 +49,7 @@ nav:
       - 0007 — Array decay at the parameter boundary: decisions/0007-array-decay-only-at-parameter-boundary.md
       - 0008 — Reject undefined behavior: decisions/0008-reject-undefined-behavior.md
       - 0009 — clang as assembler and linker: decisions/0009-clang-as-assembler-and-linker.md
+      - 0010 — Constraint violations are errors: decisions/0010-constraint-violations-are-errors.md
   - Proposal: PROPOSAL.md
 
 theme:

@@ -1,0 +1,209 @@
+---
+source: tests/sema_snapshots.rs
+expression: "dump(&Path::new(CORPUS).join(\"strings.c\"))"
+---
+types
+  #7 int
+  #10 char *
+  #11 int
+  #12 char
+  #13 int
+  #14 int
+  #15 int
+  #16 int
+  #17 int
+  #18 int
+  #19 int
+  #23 int
+  #26 void(char *)
+  #27 char[13]
+  #28 void
+  #30 void(char)
+  #31 char
+  #32 void
+  #34 void(char *)
+  #35 char[1]
+  #36 void
+  #38 void(char *)
+  #39 char[10]
+  #40 void
+  #42 void(char)
+  #43 char
+  #44 void
+  #46 void(char *)
+  #47 char[29]
+  #48 void
+  #50 void(char)
+  #51 char
+  #52 void
+  #54 void(char)
+  #55 char
+  #56 void
+  #58 void(char)
+  #59 char
+  #60 void
+  #62 void(char)
+  #63 char
+  #64 void
+  #66 void(char)
+  #67 char
+  #68 void
+  #70 void(char)
+  #71 char
+  #72 void
+  #74 void(char)
+  #75 char
+  #76 void
+  #78 void(int)
+  #79 char
+  #80 void
+  #82 void(int)
+  #83 char
+  #84 char
+  #85 int
+  #86 void
+  #88 void(int)
+  #89 char
+  #90 char
+  #91 int
+  #92 void
+  #94 char[6]
+  #97 void(char *)
+  #98 char[6]
+  #99 void
+  #101 void(char)
+  #102 char
+  #103 void
+  #105 void(int)
+  #106 char[6]
+  #107 int
+  #108 char
+  #109 void
+  #111 void(int)
+  #112 char[6]
+  #113 int
+  #114 char
+  #115 void
+  #117 void(int)
+  #118 int(char *)
+  #119 char[8]
+  #120 int
+  #121 void
+  #123 void(int)
+  #124 int(char *)
+  #125 char[6]
+  #126 int
+  #127 void
+  #129 void(int)
+  #130 int(char *)
+  #131 char[1]
+  #132 int
+  #133 void
+  #135 char[4]
+  #138 int
+  #140 int
+  #141 int
+  #142 int
+  #143 int
+  #144 int
+  #145 int
+  #146 int
+  #147 int
+  #148 void(char)
+  #149 char[4]
+  #150 int
+  #151 char
+  #152 void
+  #156 void(int)
+  #157 char[4]
+  #158 int
+  #159 char
+  #160 void
+  #162 void(char)
+  #163 char
+  #164 void
+  #166 int
+conversions
+  #12 char -> int
+  #27 array -> pointer
+  #35 array -> pointer
+  #39 array -> pointer
+  #47 array -> pointer
+  #79 char -> int
+  #83 char -> int
+  #84 char -> int
+  #89 char -> int
+  #90 char -> int
+  #98 array -> pointer
+  #108 char -> int
+  #114 char -> int
+  #119 array -> pointer
+  #125 array -> pointer
+  #131 array -> pointer
+  #159 char -> int
+bindings
+  #6 param[0] s
+  #8 local n
+  #10 param[0] s
+  #11 local n
+  #15 local n
+  #16 local n
+  #23 local n
+  #26 function print_string
+  #30 function print_char
+  #34 function print_string
+  #38 function print_string
+  #42 function print_char
+  #46 function print_string
+  #50 function print_char
+  #54 function print_char
+  #58 function print_char
+  #62 function print_char
+  #66 function print_char
+  #70 function print_char
+  #74 function print_char
+  #78 function print_int
+  #82 function print_int
+  #88 function print_int
+  #95 local greeting
+  #97 function print_string
+  #98 local greeting
+  #101 function print_char
+  #105 function print_int
+  #106 local greeting
+  #111 function print_int
+  #112 local greeting
+  #117 function print_int
+  #118 function length
+  #123 function print_int
+  #124 function length
+  #125 local greeting
+  #129 function print_int
+  #130 function length
+  #136 local word
+  #139 local i
+  #140 local i
+  #143 local i
+  #144 local i
+  #148 function print_char
+  #149 local word
+  #150 local i
+  #156 function print_int
+  #157 local word
+  #162 function print_char
+frames
+  length
+    0 param[0] s size 8 align 8
+    1 local n size 4 align 4
+  main
+    0 local greeting size 6 align 1
+    1 local word size 4 align 1
+    2 local i size 4 align 4
+strings
+  l_.str.0 "hello, world"
+  l_.str.1 ""
+  l_.str.2 "tab:\there"
+  l_.str.3 "quote:\" backslash:\\ single:'"
+  l_.str.4 "hello"
+  l_.str.5 "counted"
+  l_.str.6 "abc"

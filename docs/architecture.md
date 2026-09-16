@@ -24,6 +24,7 @@ section below links only to the ADRs relevant to it, rather than repeating their
 - [Code generation](#code-generation)
 - [The driver](#the-driver)
 - [The language subset](#the-language-subset)
+    - [Where this subset is stricter than C](#where-this-subset-is-stricter-than-c)
 - [The runtime shim](#the-runtime-shim)
 - [Testing architecture](#testing-architecture)
 - [Directory](#directory)
@@ -212,12 +213,32 @@ dive-deeper below, along with the handful of semantic rules — like `char` beha
 arithmetic — that more than one compiler stage has to agree on, and the complete list of standard C
 features this subset deliberately does not include.
 
+### Where this subset is stricter than C
+
+Almost everything this compiler rejects, `clang` rejects too. Four programs are the exception: real
+C that `clang` builds and this compiler turns down on purpose. They are listed here because a
+restriction nobody wrote down is indistinguishable from a bug, and each one lives as a file in
+`tests/programs/invalid/` that states the same reason in its own header. A test fails if the two
+lists disagree.
+
+| Program | What is rejected | Why |
+| --- | --- | --- |
+| `array_as_condition.c` | An array tested for truth, `if (a)` | An array becomes a pointer at the argument position and nowhere else, so there is nothing for the condition to test. [ADR 0007](decisions/0007-array-decay-only-at-parameter-boundary.md) |
+| `falls_off_the_end.c` | A value-returning function whose control flow can reach its closing brace | Using the result is undefined behavior, which this compiler rejects rather than emits code for. `clang` warns instead. [ADR 0008](decisions/0008-reject-undefined-behavior.md) |
+| `initializer_too_long.c` | More initializers than the array has elements | A constraint violation in C99, which `clang` warns about and then truncates. [ADR 0010](decisions/0010-constraint-violations-are-errors.md) |
+| `zero_length_array.c` | An array declared with a length of zero | A constraint violation in C99, which `clang` accepts as a GNU extension. [ADR 0010](decisions/0010-constraint-violations-are-errors.md) |
+
+Every one of these narrows the accepted language rather than widening it, so a program this
+compiler accepts is still a program `clang` accepts. That direction is what keeps differential
+testing meaningful, and it is the only direction a deviation is allowed to go.
+
 ??? note "Dive Deeper: the full grammar and its edge cases"
     --8<-- "docs/dive-deep/language-subset.md"
 
 ??? info "Relevant ADRs"
     - [ADR 0001 — Compile a subset of C, with clang as the testing oracle](decisions/0001-subset-of-c-with-clang-as-oracle.md)
     - [ADR 0007 — Array-to-pointer decay only at the function-parameter boundary](decisions/0007-array-decay-only-at-parameter-boundary.md)
+    - [ADR 0010 — Constraint violations are errors, not warnings](decisions/0010-constraint-violations-are-errors.md)
 
 ## The runtime shim
 

@@ -1,0 +1,277 @@
+---
+source: tests/sema_snapshots.rs
+expression: "dump(&Path::new(CORPUS).join(\"functions.c\"))"
+---
+types
+  #19 int
+  #20 int
+  #21 int
+  #22 int
+  #23 int
+  #26 int
+  #30 int
+  #35 int
+  #36 int
+  #37 int
+  #48 int
+  #49 int
+  #50 int
+  #51 int
+  #52 int
+  #53 int
+  #54 int
+  #55 int
+  #56 int
+  #57 int
+  #58 int
+  #59 int
+  #60 int
+  #61 int
+  #62 int
+  #74 int(int, int, int, int, int, int, int, int)
+  #75 int
+  #76 int
+  #77 int
+  #78 int
+  #79 int
+  #80 int
+  #81 int
+  #82 int
+  #83 int
+  #84 int
+  #85 int
+  #89 int
+  #90 int
+  #91 int
+  #92 int
+  #96 int
+  #97 int(int)
+  #98 int
+  #99 int
+  #100 int
+  #101 int
+  #102 int
+  #106 int
+  #107 int
+  #108 int
+  #109 int
+  #113 int(int)
+  #114 int
+  #115 int
+  #116 int
+  #117 int
+  #118 int(int)
+  #119 int
+  #120 int
+  #121 int
+  #122 int
+  #123 int
+  #126 void(int)
+  #127 int(void)
+  #128 int
+  #129 void
+  #131 void(int)
+  #132 int(int)
+  #133 int
+  #134 int
+  #135 void
+  #137 void(int)
+  #138 int(int, int)
+  #139 int
+  #140 int
+  #141 int
+  #142 void
+  #144 void(int)
+  #145 int(int, int)
+  #146 int(int, int)
+  #147 int
+  #148 int
+  #149 int
+  #150 int(int, int)
+  #151 int
+  #152 int
+  #153 int
+  #154 int
+  #155 void
+  #157 void(int)
+  #158 int(int, int, int, int, int, int, int, int)
+  #159 int
+  #160 int
+  #161 int
+  #162 int
+  #163 int
+  #164 int
+  #165 int
+  #166 int
+  #167 int
+  #168 void
+  #170 void(int)
+  #171 int(int, int, int, int, int, int, int, int, int)
+  #172 int
+  #173 int
+  #174 int
+  #175 int
+  #176 int
+  #177 int
+  #178 int
+  #179 int
+  #180 int
+  #181 int
+  #182 void
+  #184 void(int)
+  #185 int(int)
+  #186 int
+  #187 int
+  #188 void
+  #190 void(int)
+  #191 int(int)
+  #192 int
+  #193 int
+  #194 void
+  #196 int
+  #197 int
+  #198 int
+  #200 void(void)
+  #201 void
+  #203 void(void)
+  #204 void
+  #206 void(int)
+  #207 int
+  #208 void
+  #210 int
+  #213 void(int)
+  #214 int(int)
+  #215 int
+  #216 int
+  #217 int
+  #218 int
+  #219 void
+  #221 void(int)
+  #222 int
+  #223 void
+  #225 void(char)
+  #226 char
+  #227 void
+  #229 int
+conversions
+bindings
+  #18 global global_counter
+  #19 global global_counter
+  #20 global global_counter
+  #29 param[0] n
+  #30 param[0] n
+  #33 param[0] a
+  #34 param[1] b
+  #35 param[0] a
+  #36 param[1] b
+  #40 param[0] a
+  #41 param[1] b
+  #42 param[2] c
+  #43 param[3] d
+  #44 param[4] e
+  #45 param[5] f
+  #46 param[6] g
+  #47 param[7] h
+  #48 param[0] a
+  #49 param[1] b
+  #51 param[2] c
+  #53 param[3] d
+  #55 param[4] e
+  #57 param[5] f
+  #59 param[6] g
+  #61 param[7] h
+  #65 param[0] a
+  #66 param[1] b
+  #67 param[2] c
+  #68 param[3] d
+  #69 param[4] e
+  #70 param[5] f
+  #71 param[6] g
+  #72 param[7] h
+  #73 param[8] i
+  #74 function sum_eight
+  #75 param[0] a
+  #76 param[1] b
+  #77 param[2] c
+  #78 param[3] d
+  #79 param[4] e
+  #80 param[5] f
+  #81 param[6] g
+  #82 param[7] h
+  #84 param[8] i
+  #88 param[0] n
+  #89 param[0] n
+  #96 param[0] n
+  #97 function factorial
+  #98 param[0] n
+  #105 param[0] n
+  #106 param[0] n
+  #109 param[0] n
+  #113 function fibonacci
+  #114 param[0] n
+  #118 function fibonacci
+  #119 param[0] n
+  #126 function print_int
+  #127 function zero
+  #131 function print_int
+  #132 function identity
+  #137 function print_int
+  #138 function add
+  #144 function print_int
+  #145 function add
+  #146 function add
+  #150 function add
+  #157 function print_int
+  #158 function sum_eight
+  #170 function print_int
+  #171 function sum_nine
+  #184 function print_int
+  #185 function factorial
+  #190 function print_int
+  #191 function fibonacci
+  #196 global global_counter
+  #200 function bump
+  #203 function bump
+  #206 function print_int
+  #207 global global_counter
+  #211 local n
+  #213 function print_int
+  #214 function identity
+  #215 local n
+  #221 function print_int
+  #222 local n
+  #225 function print_char
+frames
+  add
+    0 param[0] a size 4 align 4
+    1 param[1] b size 4 align 4
+  bump
+  factorial
+    0 param[0] n size 4 align 4
+  fibonacci
+    0 param[0] n size 4 align 4
+  identity
+    0 param[0] n size 4 align 4
+  main
+    0 local n size 4 align 4
+  sum_eight
+    0 param[0] a size 4 align 4
+    1 param[1] b size 4 align 4
+    2 param[2] c size 4 align 4
+    3 param[3] d size 4 align 4
+    4 param[4] e size 4 align 4
+    5 param[5] f size 4 align 4
+    6 param[6] g size 4 align 4
+    7 param[7] h size 4 align 4
+  sum_nine
+    0 param[0] a size 4 align 4
+    1 param[1] b size 4 align 4
+    2 param[2] c size 4 align 4
+    3 param[3] d size 4 align 4
+    4 param[4] e size 4 align 4
+    5 param[5] f size 4 align 4
+    6 param[6] g size 4 align 4
+    7 param[7] h size 4 align 4
+    8 param[8] i size 4 align 4
+  zero
+strings

@@ -26,3 +26,5 @@ They sit alongside the other documents rather than replacing any of them:
   "correct" means and building the machinery to prove it, then turning source text into tokens.
 - [Phase 2 — The AST and the recursive-descent parser](Phase-2-Explanation.md): turning that flat
   list of tokens into a tree that records what is nested inside what.
+- [Phase 3 — Semantic analysis](Phase-3-Explanation.md): deciding whether a well-formed program also
+  makes sense, and writing down everything the backend will need to know about it.

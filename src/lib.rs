@@ -17,6 +17,7 @@ pub mod diagnostics;
 pub mod lexer;
 pub mod parser;
 pub mod runtime;
+pub mod sema;
 
 use std::fmt;
 use std::fs;
@@ -112,6 +113,17 @@ pub fn compile(
     if options.stage() == Stage::Ast {
         return Ok(Artifacts {
             dump: Some(ast::dump(&parsed.program, ast::Spans::Hidden)),
+        });
+    }
+
+    let analysis = sema::analyze(&parsed.program);
+    if !analysis.diagnostics.is_empty() {
+        return Err(analysis.diagnostics);
+    }
+
+    if options.stage() == Stage::Annotations {
+        return Ok(Artifacts {
+            dump: Some(analysis.annotations.dump()),
         });
     }
 

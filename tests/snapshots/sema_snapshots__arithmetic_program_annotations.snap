@@ -1,0 +1,275 @@
+---
+source: tests/sema_snapshots.rs
+expression: "dump(&Path::new(CORPUS).join(\"arithmetic.c\"))"
+---
+types
+  #4 int
+  #7 int
+  #10 void(int)
+  #11 int
+  #12 int
+  #13 int
+  #14 void
+  #16 void(int)
+  #17 int
+  #18 int
+  #19 int
+  #20 void
+  #22 void(int)
+  #23 int
+  #24 int
+  #25 int
+  #26 void
+  #28 void(int)
+  #29 int
+  #30 int
+  #31 int
+  #32 void
+  #34 void(int)
+  #35 int
+  #36 int
+  #37 int
+  #38 void
+  #40 void(int)
+  #41 int
+  #42 int
+  #43 void
+  #45 void(int)
+  #46 int
+  #47 int
+  #48 void
+  #50 void(int)
+  #51 int
+  #52 int
+  #53 void
+  #55 void(int)
+  #56 int
+  #57 int
+  #58 void
+  #60 void(int)
+  #61 int
+  #62 int
+  #63 int
+  #64 int
+  #65 int
+  #66 void
+  #68 void(int)
+  #69 int
+  #70 int
+  #71 int
+  #72 int
+  #73 int
+  #74 void
+  #76 void(int)
+  #77 int
+  #78 int
+  #79 int
+  #80 int
+  #81 int
+  #82 int
+  #83 int
+  #84 void
+  #86 void(int)
+  #87 int
+  #88 int
+  #89 int
+  #90 int
+  #91 int
+  #92 int
+  #93 int
+  #94 void
+  #96 void(int)
+  #97 int
+  #98 int
+  #99 int
+  #100 int
+  #101 int
+  #102 int
+  #103 int
+  #104 void
+  #106 void(int)
+  #107 int
+  #108 int
+  #109 int
+  #110 int
+  #111 int
+  #112 int
+  #113 int
+  #114 int
+  #115 int
+  #116 int
+  #117 int
+  #118 void
+  #120 void(int)
+  #121 int
+  #122 int
+  #123 int
+  #124 int
+  #125 int
+  #126 void
+  #128 void(int)
+  #129 int
+  #130 int
+  #131 int
+  #132 int
+  #133 int
+  #134 void
+  #136 void(int)
+  #137 int
+  #138 int
+  #139 int
+  #140 int
+  #141 int
+  #142 void
+  #144 void(int)
+  #145 int
+  #146 int
+  #147 int
+  #148 int
+  #149 int
+  #150 int
+  #151 int
+  #152 int
+  #153 int
+  #154 void
+  #156 int
+  #159 int
+  #160 int
+  #161 int
+  #162 int
+  #163 int
+  #165 void(int)
+  #166 int
+  #167 int
+  #168 void
+  #170 void(int)
+  #171 int
+  #172 void
+  #174 void(int)
+  #175 int
+  #176 int
+  #177 void
+  #179 void(int)
+  #180 int
+  #181 int
+  #182 void
+  #184 void(int)
+  #185 int
+  #186 int
+  #187 void
+  #189 int
+  #192 int
+  #195 int
+  #196 int
+  #197 int
+  #198 int
+  #199 int
+  #201 void(int)
+  #202 int
+  #203 void
+  #205 void(int)
+  #206 int
+  #207 void
+  #209 char
+  #212 void(int)
+  #213 char
+  #214 void
+  #216 void(int)
+  #217 char
+  #218 int
+  #219 int
+  #220 void
+  #222 void(char)
+  #223 char
+  #224 void
+  #226 int
+conversions
+  #213 char -> int
+  #217 char -> int
+bindings
+  #5 local a
+  #8 local b
+  #10 function print_int
+  #11 local a
+  #12 local b
+  #16 function print_int
+  #17 local a
+  #18 local b
+  #22 function print_int
+  #23 local a
+  #24 local b
+  #28 function print_int
+  #29 local a
+  #30 local b
+  #34 function print_int
+  #35 local a
+  #36 local b
+  #40 function print_int
+  #41 local a
+  #45 function print_int
+  #46 local b
+  #50 function print_int
+  #51 local b
+  #55 function print_int
+  #60 function print_int
+  #68 function print_int
+  #76 function print_int
+  #86 function print_int
+  #87 local a
+  #88 local b
+  #90 local b
+  #96 function print_int
+  #97 local a
+  #98 local b
+  #100 local b
+  #101 local a
+  #106 function print_int
+  #107 local a
+  #108 local b
+  #110 local a
+  #111 local b
+  #113 local a
+  #114 local b
+  #120 function print_int
+  #128 function print_int
+  #136 function print_int
+  #144 function print_int
+  #145 local b
+  #148 local a
+  #149 local b
+  #157 local n
+  #159 local n
+  #160 local n
+  #165 function print_int
+  #166 local n
+  #170 function print_int
+  #171 local n
+  #174 function print_int
+  #175 local n
+  #179 function print_int
+  #180 local n
+  #184 function print_int
+  #185 local n
+  #190 local x
+  #193 local y
+  #195 local x
+  #196 local y
+  #201 function print_int
+  #202 local x
+  #205 function print_int
+  #206 local y
+  #210 local c
+  #212 function print_int
+  #213 local c
+  #216 function print_int
+  #217 local c
+  #222 function print_char
+frames
+  main
+    0 local a size 4 align 4
+    1 local b size 4 align 4
+    2 local n size 4 align 4
+    3 local x size 4 align 4
+    4 local y size 4 align 4
+    5 local c size 1 align 1
+strings

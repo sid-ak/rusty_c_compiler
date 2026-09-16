@@ -22,7 +22,7 @@ The four commands CI runs, in the order that fails fastest.
 2. `cargo clippy --all-targets -- -D warnings`: includes the no-unwrap/expect/panic/indexing denials
    for `src/`. Test code is exempt via `clippy.toml`, but only inside `#[test]` bodies — a helper in
    a `tests/*.rs` file needs the file-level `#![allow(clippy::expect_used)]` those files carry.
-3. `cargo test`: 170 tests across seven binaries.
+3. `cargo test`: 271 tests across nine binaries.
 4. `uv run mkdocs build --strict`: fails on a broken link or a page missing from `nav`. The red
    MkDocs 2.0 block is an advisory banner from mkdocs-material, not an error — read the last line.
 
@@ -30,12 +30,14 @@ The four commands CI runs, in the order that fails fastest.
 
 | Command | Scope | Tests |
 | --- | --- | --- |
-| `cargo test --lib` | in-crate units; no C compiled, no processes spawned | 142 |
-| `cargo test --test cli` | usage, exit codes, library callable in process | 3 |
+| `cargo test --lib` | in-crate units; no C compiled, no processes spawned | 224 |
+| `cargo test --test cli` | usage, exit codes, `--check` over both corpora | 6 |
 | `cargo test --test lexer_snapshots` | full token stream for a representative program | 1 |
 | `cargo test --test parser_snapshots` | AST for every corpus program, and the coverage matrix | 10 |
 | `cargo test --test parser_no_panic` | every corpus program cut short at every byte, plus `tests/adversarial/` | 8 |
 | `cargo test --test runtime_shim` | compiles, links, runs C against the real `shim.o` | 6 |
+| `cargo test --test sema_snapshots` | annotations for every corpus program, and that each analyzes | 8 |
+| `cargo test --test invalid_programs` | every rejection rule, and what clang makes of it | 7 |
 | `cargo test --lib precedence` | any substring filters by test name | 1 |
 | `cargo test -- --nocapture` | show `println!` from passing tests | — |
 
@@ -356,6 +358,138 @@ head -c 4096 /dev/urandom > /tmp/garbage.c
 Must produce diagnostics and terminate — never a panic, never a hang. This is the invariant phase 5
 will fuzz against.
 
+### 13. Check a program, and see what analysis recorded
+
+```bash
+cat > /tmp/ann.c <<'EOF'
+int add(int a, char b) {
+    return a + b;
+}
+
+int main(void) {
+    char label[4] = "ok";
+    return add(1, label[0]);
+}
+EOF
+./target/debug/rustycc --check /tmp/ann.c
+```
+
+Exit 0 and no output at all — which is the point of `--check`: it is meant to be run by something
+that reads exit codes. To see what it worked out:
+
+```bash
+./target/debug/rustycc --dump-annotations /tmp/ann.c
+```
+
+```
+types
+  #2 int
+  #3 char
+  #4 int
+  #7 char[3]
+  #10 int(int, char)
+  #11 int
+  #12 char[4]
+  #13 int
+  #14 char
+  #15 int
+conversions
+  #3 char -> int
+bindings
+  #0 param[0] a
+  #1 param[1] b
+  #2 param[0] a
+  #3 param[1] b
+  #8 local label
+  #10 function add
+  #12 local label
+frames
+  add
+    0 param[0] a size 4 align 4
+    1 param[1] b size 1 align 1
+  main
+    0 local label size 4 align 1
+strings
+  l_.str.0 "ok"
+```
+
+Four things worth reading off it:
+
+1. `#3 char -> int` is the `b` in `a + b`, and it is the only conversion in the file. `label[0]` is
+   already a `char` and the parameter it is passed to is a `char`, so nothing happens there.
+2. `#7 char[3]` is the literal `"ok"` — two characters and the terminator. The variable it
+   initializes is `char[4]`, which is why it fits.
+3. The frame for `add` stores its `char` parameter in one byte while computing on it as an `int`.
+   Storage and computation are different questions, and this is where that shows.
+4. Every number is a node id from the syntax tree. Nothing was written onto the tree to produce
+   this; the tree is exactly what `--dump-ast` printed.
+
+### 14. Several semantic errors in one file
+
+```bash
+cat > /tmp/bad.c <<'EOF'
+int total;
+int total;
+
+int describe(int n) {
+    int seen;
+    seen = n;
+}
+
+int main(void) {
+    return describe(1, 2) + missing;
+}
+EOF
+./target/debug/rustycc --check /tmp/bad.c
+```
+
+Exit 1, and:
+
+```
+/tmp/bad.c:2:5: error: redeclaration of 'total' in this scope
+int total;
+    ^~~~~
+/tmp/bad.c:1:5: note: previous declaration of 'total' is here
+int total;
+    ^~~~~
+/tmp/bad.c:7:1: error: control reaches the end of non-void function 'describe'
+}
+^
+/tmp/bad.c:10:12: error: 'describe' takes 1 argument, but 2 were passed
+    return describe(1, 2) + missing;
+           ^~~~~~~~~~~~~~
+/tmp/bad.c:10:29: error: undeclared identifier 'missing'
+    return describe(1, 2) + missing;
+                            ^~~~~~~
+rustycc: 4 errors generated
+```
+
+The redeclaration is the one to look at: the note has its own line, its own source line, and its own
+caret, pointing at the first `total` rather than merely claiming it exists somewhere. The
+fall-off-the-end error points at the closing brace, because that is the place control reaches.
+
+Note also what is *not* reported. `missing` is undeclared, and the `+` it is an operand of says
+nothing — one mistake, one message.
+
+### 15. Where the subset is stricter than C
+
+```bash
+clang -O0 -std=c99 -fsyntax-only tests/programs/invalid/zero_length_array.c; echo "clang: $?"
+./target/debug/rustycc --check tests/programs/invalid/zero_length_array.c; echo "rustycc: $?"
+```
+
+clang exits 0. `rustycc` exits 1 with `array size must be greater than zero`. That is deliberate, and
+the file says so in its own header. Four programs in `tests/programs/invalid/` are like this; the
+full list, and the reasoning, is in
+[`architecture.md`](architecture.md#where-this-subset-is-stricter-than-c), and
+`cargo test --test invalid_programs` fails if the two lists disagree.
+
+To see every rejection rule and what clang makes of each:
+
+```bash
+cat tests/programs/invalid/COVERAGE.md
+```
+
 ## The runtime shim by hand
 
 ```bash
@@ -441,7 +575,8 @@ found once can never come back unnoticed.
 | --- | --- | --- |
 | `--dump-tokens` | the lexer | prints the token stream |
 | `--dump-ast` | the parser | prints the syntax tree |
-| `--check` | semantic analysis | accepted, prints nothing — analyzer is phase 3 |
+| `--check` | semantic analysis | runs the whole front end; prints nothing when accepted |
+| `--dump-annotations` | semantic analysis | prints the types, conversions, bindings, frames, and interned literals |
 | `-S` | code generation | accepted, writes nothing — backend is phase 4 |
 | `-o <FILE>` | — | parsed and carried; nothing links yet |
 | `--keep-temps` | — | parsed; the driver that makes temp files is phase 4 |

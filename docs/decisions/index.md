@@ -19,6 +19,7 @@ stays legible.
 | [0007](0007-array-decay-only-at-parameter-boundary.md) | Array-to-pointer decay only at the function-parameter boundary | Accepted |
 | [0008](0008-reject-undefined-behavior.md) | Reject undefined behavior rather than admit it | Accepted |
 | [0009](0009-clang-as-assembler-and-linker.md) | Drive the toolchain through clang, not as and ld | Accepted |
+| [0010](0010-constraint-violations-are-errors.md) | Constraint violations are errors, not warnings | Accepted |
 
 ## Writing a new one
 

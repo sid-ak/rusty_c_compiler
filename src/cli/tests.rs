@@ -40,6 +40,7 @@ fn each_debug_flag_selects_its_stage() {
     let cases = [
         ("--dump-tokens", Stage::Tokens),
         ("--dump-ast", Stage::Ast),
+        ("--dump-annotations", Stage::Annotations),
         ("--check", Stage::Check),
         ("-S", Stage::Assembly),
     ];

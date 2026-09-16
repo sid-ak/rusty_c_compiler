@@ -9,20 +9,22 @@ correct.
 
 ## Status
 
-The front end reads. `rustycc` builds and runs from a clean checkout, turns a C source file into a
-syntax tree covering the whole subset grammar, and prints it with `rustycc program.c --dump-ast`. A
-program it cannot read comes back as diagnostics with a caret under the offending text — one per
-mistake, in source order, and a construct that is real C this subset simply does not implement is
-told apart from one that is malformed.
+The front end is complete. `rustycc` builds and runs from a clean checkout, and takes a C source
+file through lexing, parsing, and semantic analysis. `rustycc --check program.c` answers whether a
+program is one this compiler will accept, and `rustycc --dump-tokens`, `--dump-ast`, and
+`--dump-annotations` print what each stage made of it. A program it turns down comes back as
+diagnostics with a caret under the offending text — one per mistake, in source order, with a second
+caret under the earlier declaration where a name collides with one, and a construct that is real C
+this subset simply does not implement told apart from one that is malformed.
 
-It does not yet check what a program means or generate code, so it cannot produce an executable:
-`rustycc program.c -o program` accepts its arguments and runs the stages that exist.
+It does not yet generate code, so it cannot produce an executable: `rustycc program.c -o program`
+accepts its arguments and runs the stages that exist.
 
 In the repo:
 
 - `src/diagnostics.rs` — spans over byte offsets, a source map that resolves one to a line and
-  column, the caret renderer every pass reports through, and a bag that collects diagnostics and
-  returns them in source order.
+  column, the caret renderer every pass reports through, notes that can point at a second place in
+  the file, and a bag that collects diagnostics and returns them in source order.
 - `src/lexer/` — the token set and keyword table, and a scanner over raw bytes that always
   terminates, never panics, decodes literals once, and resynchronizes after a malformed construct so
   a file with four mistakes reports four of them.
@@ -33,17 +35,27 @@ In the repo:
   expressions, panic-mode recovery that provably consumes a token per step, and a limit on how
   deep the tree may grow — through nesting or through long operator chains — that turns a hostile
   input into a diagnostic rather than a stack overflow.
-- `tests/programs/` — five subset-C programs, one per feature area, with a coverage matrix that CI
-  holds them to. They are the parser's snapshots now and the differential corpus later.
+- `src/sema/` — the type model and its promotion, decay, and compatibility rules; a scope stack
+  resolving every identifier; a two-pass walk that registers the top level before it walks any body,
+  so a call to a function defined later in the file resolves; thirty-one checks, each with its own
+  message and span; and the annotation tables code generation will read.
+- `tests/programs/` — five subset-C programs, one per feature area, and thirty-one in `invalid/`
+  that must stay rejected, each with a coverage matrix CI holds them to. The valid ones are the
+  parser's and analyzer's snapshots now and the differential corpus later.
 - `runtime/shim.c` — `print_int`, `print_char`, and `print_string` on `write(2)`, compiled once by
   the build script into the object both compilers will link in differential testing.
 - `.github/workflows/ci.yml` — fmt, clippy, and test on an Apple Silicon runner, behind a preflight
   that checks the C toolchain resolves.
 
-Semantic analysis, code generation, and the differential suite are open, tracked as
+Four programs in `tests/programs/invalid/` are real C that `clang` builds and this compiler rejects
+on purpose. They are listed in
+[`docs/architecture.md`](docs/architecture.md#where-this-subset-is-stricter-than-c), and a test fails
+if that list and the corpus disagree.
+
+Code generation and the differential suite are open, tracked as
 [GitHub issues](https://github.com/sid-ak/rusty_c_compiler/issues) under one milestone per phase.
 The design and subset grammar are in [`docs/architecture.md`](docs/architecture.md), the phased plan
-in [`docs/PLAN.md`](docs/PLAN.md), nine ADRs in [`docs/decisions/`](docs/decisions/index.md), the
+in [`docs/PLAN.md`](docs/PLAN.md), ten ADRs in [`docs/decisions/`](docs/decisions/index.md), the
 commands for driving it by hand in [`docs/CHEATSHEET.md`](docs/CHEATSHEET.md), and the working
 conventions in [`AGENTS.md`](AGENTS.md).
 
@@ -91,7 +103,12 @@ To see what the compiler makes of a file:
 
 1. `./target/debug/rustycc program.c --dump-tokens`: print each token with the source range it came
    from.
-2. `./target/debug/rustycc broken.c --dump-tokens`: on a malformed file, print a diagnostic with the
+2. `./target/debug/rustycc program.c --dump-ast`: print the syntax tree the parser built.
+3. `./target/debug/rustycc program.c --dump-annotations`: print the types, conversions, bindings,
+   frame inventories, and interned string literals analysis recorded.
+4. `./target/debug/rustycc --check program.c`: run the whole front end and answer with an exit code,
+   printing nothing when the program is accepted.
+5. `./target/debug/rustycc --check broken.c`: on a rejected file, print a diagnostic with the
    offending line and a caret, and exit non-zero.
 
 The toolchain is pinned in `rust-toolchain.toml`, so `cargo` installs the right compiler on its own.

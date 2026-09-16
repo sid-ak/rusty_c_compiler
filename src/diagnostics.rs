@@ -85,7 +85,20 @@ pub struct Diagnostic {
     /// Where in the source the problem is.
     pub span: Span,
     /// Extra lines shown beneath the message, for context the message itself would overcrowd.
-    pub notes: Vec<String>,
+    pub notes: Vec<Note>,
+}
+
+/// One line of context under a diagnostic.
+///
+/// A note that names a place — the declaration this one collides with, the loop this `break` is
+/// not inside — carries that place, so the renderer can point at it the same way it points at the
+/// error itself. A note that only explains carries none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Note {
+    /// What the note says.
+    pub message: String,
+    /// Where it is about, when it is about somewhere.
+    pub span: Option<Span>,
 }
 
 impl Diagnostic {
@@ -126,10 +139,33 @@ impl Diagnostic {
         )
     }
 
-    /// This diagnostic with `note` appended, for chaining at the construction site.
+    /// This diagnostic with an explanatory `note` appended, for chaining at the construction site.
     pub fn with_note(mut self, note: impl Into<String>) -> Self {
-        self.notes.push(note.into());
+        self.notes.push(Note {
+            message: note.into(),
+            span: None,
+        });
         self
+    }
+
+    /// This diagnostic with `note` appended, pointing at `span`.
+    ///
+    /// Used where the note names a second place in the file — the earlier declaration a
+    /// redeclaration collides with, say — so the reader is shown it rather than told it exists.
+    pub fn with_note_at(mut self, span: Span, note: impl Into<String>) -> Self {
+        self.notes.push(Note {
+            message: note.into(),
+            span: Some(span),
+        });
+        self
+    }
+
+    /// Just the text of each note, for a test that does not care where they point.
+    pub fn note_messages(&self) -> Vec<&str> {
+        self.notes
+            .iter()
+            .map(|note| note.message.as_str())
+            .collect()
     }
 }
 
@@ -212,23 +248,37 @@ impl<'source> SourceMap<'source> {
     /// A span covering more than one line is underlined only on its first line, since a caret that
     /// ran past the end of the line it is printed under would point at nothing.
     pub fn render(&self, diagnostic: &Diagnostic) -> String {
-        let location = self.location(diagnostic.span.start);
-        let line = self.line_bytes(self.line_index(diagnostic.span.start.min(self.source.len())));
-        let column_offset = location.column - 1;
-
-        let mut rendered = format!(
-            "{}:{location}: error: {}\n",
-            self.path.display(),
-            diagnostic.message
-        );
-        rendered.push_str(&String::from_utf8_lossy(line));
-        rendered.push('\n');
-        rendered.push_str(&caret_line(line, column_offset, diagnostic.span.len()));
+        let mut rendered = self.render_at(diagnostic.span, "error", &diagnostic.message);
 
         for note in &diagnostic.notes {
-            rendered.push_str("\nnote: ");
-            rendered.push_str(note);
+            match note.span {
+                None => {
+                    rendered.push_str("\nnote: ");
+                    rendered.push_str(&note.message);
+                }
+                Some(span) => {
+                    rendered.push('\n');
+                    rendered.push_str(&self.render_at(span, "note", &note.message));
+                }
+            }
         }
+
+        rendered
+    }
+
+    /// `label: message` at `span`, followed by the source line and a caret under it.
+    ///
+    /// The one place a location, a source line, and an underline are put together, so an error and
+    /// a note that points somewhere are laid out identically rather than nearly so.
+    fn render_at(&self, span: Span, label: &str, message: &str) -> String {
+        let location = self.location(span.start);
+        let line = self.line_bytes(self.line_index(span.start.min(self.source.len())));
+        let column_offset = location.column - 1;
+
+        let mut rendered = format!("{}:{location}: {label}: {message}\n", self.path.display());
+        rendered.push_str(&String::from_utf8_lossy(line));
+        rendered.push('\n');
+        rendered.push_str(&caret_line(line, column_offset, span.len()));
 
         rendered
     }

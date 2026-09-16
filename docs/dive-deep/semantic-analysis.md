@@ -24,12 +24,16 @@ generator never has to ask one:
   deterministic order — which the code generator turns directly into stack offsets.
 - String pooling: an interned string-literal table mapping each distinct literal's decoded bytes to
   one label, so two occurrences of `"hello"` share one entry in the read-only data section.
-- Implicit conversions made explicit: a `char` widened to `int` becomes an actual cast node in the
-  annotation, and an array decaying to a pointer at a call site becomes an actual decay node.
+- Implicit conversions made explicit: a `char` widened to `int`, an `int` truncated into a `char`,
+  and an array decaying to a pointer at a call site are each recorded against the node whose value
+  is converted. They are entries in the annotation, not nodes spliced into the tree — the tree stays
+  exactly what the parser built. Two readings are available afterwards: what the source wrote, and
+  what the use site actually receives.
 
-That last point is load-bearing for the backend: because promotions and decays are materialized here,
-the code generator's expression lowering is a direct structural walk with no type inference of its
-own. Every place the backend would otherwise have to reason "is this a `char`, and does it need
+That last point is load-bearing for the backend: because promotions and decays are decided here, the
+code generator's expression lowering is a direct structural walk with no type inference of its own.
+One rule decides every conversion, so the promotion at an argument, the truncation at an assignment,
+and the decay at a call cannot drift apart. Every place the backend would otherwise have to reason "is this a `char`, and does it need
 widening before this comparison?" has already been answered before code generation starts.
 
 ## Statically detectable undefined behavior is rejected here
