@@ -19,6 +19,9 @@ purpose-built toy language, `clang` serves directly as the testing oracle.
 
 - [Decisions](decisions/index.md) — the ADRs. What was chosen, what was rejected, and why.
 
+- [Reports](reports/acceptance.md) — the acceptance run, and a unit test report per component of
+  the compiler.
+
 - [Cheatsheet](CHEATSHEET.md) — the commands for building it, testing it, and driving it by hand,
   with the output each one actually produces.
 

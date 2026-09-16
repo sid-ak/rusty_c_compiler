@@ -9,9 +9,10 @@ correct.
 
 ## Status
 
-`rustycc` compiles a subset of C to a native macOS executable. `rustycc program.c -o program`
-produces a program that runs, and every program in the test corpus produces byte-for-byte the same
-output as the same program built by `clang -O0 -std=c99`.
+`rustycc` compiles a subset of C to a native macOS executable, and it is functionally complete
+against its own definition of done: every program in the corpus is built by both this compiler and
+`clang -O0 -std=c99`, both binaries are run, and their output and exit status are compared byte for
+byte. Sixty-four programs, no known mismatches.
 
 The pipeline runs end to end: source text to tokens, tokens to a syntax tree, the tree to types and
 bindings, and those to ARM64 assembly that `clang` assembles and links against the runtime shim.
@@ -20,8 +21,10 @@ bindings, and those to ARM64 assembly that `clang` assembles and links against t
 offending text — one per mistake, in source order, and a second caret under the earlier declaration
 where a name collides with one.
 
-Not built yet: the differential harness that replaces the corpus's recorded expectations with
-`clang` run side by side, the fuzzing targets, and the random program generator.
+Beyond the hand-written corpus, a seeded generator writes random well-typed programs and puts them
+through the same comparison, and three `cargo-fuzz` targets run raw bytes through the lexer, the
+parser, and the whole front end. The acceptance run is recorded in
+[`docs/reports/acceptance.md`](docs/reports/acceptance.md).
 
 In the repo:
 
@@ -46,20 +49,30 @@ In the repo:
   control flow with a loop-context stack, Apple's ARM64 calling convention, and the data sections.
 - `src/driver.rs` — assembling and linking through `clang`, with intermediates removed however the
   run ends and a toolchain failure reported in the toolchain's own words.
-- `tests/programs/` — seven subset-C programs covering the grammar, each carrying the exit code and
-  stdout `clang` produces for it, and thirty-one in `invalid/` that must stay rejected. Both have a
-  coverage matrix CI holds them to.
+- `tests/programs/` — sixty-four subset-C programs covering the grammar and the pairs of features
+  that have to agree with each other, each carrying the exit code and stdout `clang` produces for
+  it, and thirty-one in `invalid/` that must stay rejected. Both have a coverage matrix CI holds
+  them to.
+- `tests/differential.rs` and `tests/harness/` — each program built both ways, run under a timeout,
+  and compared on stdout, stderr, and exit status, with a mismatch, a build failure, and a hang kept
+  apart as three different answers. `tests/harness_self_tests.rs` injects a wrong answer on every
+  axis, because a harness that cannot fail proves nothing.
+- `tests/generator/` and `tests/generated.rs` — random well-typed programs, kept inside defined
+  behavior by interval arithmetic rather than by hoping, put through the same comparison.
+- `fuzz/` — three `cargo-fuzz` targets over the front end, a script that seeds a run from everything
+  already in the repository, and the place a minimized crash goes to become an ordinary test.
 - `runtime/shim.c` — `print_int`, `print_char`, and `print_string` on `write(2)`, compiled once by
   the build script into the object both compilers link against.
-- `.github/workflows/ci.yml` — fmt, clippy, test, and docs on an Apple Silicon runner, behind a
-  preflight that checks the C toolchain resolves.
+- `.github/workflows/` — fmt, clippy, test, differential, and docs on an Apple Silicon runner behind
+  a preflight that checks the C toolchain resolves; and a nightly schedule for the runs measured in
+  minutes rather than seconds.
 
 Four programs in `tests/programs/invalid/` are real C that `clang` builds and this compiler rejects
 on purpose. They are listed in
 [`docs/architecture.md`](docs/architecture.md#where-this-subset-is-stricter-than-c), and a test fails
 if that list and the corpus disagree.
 
-Differential testing, fuzzing, and system acceptance are open, tracked as
+All five phases of [`docs/PLAN.md`](docs/PLAN.md) are complete; the work is tracked as
 [GitHub issues](https://github.com/sid-ak/rusty_c_compiler/issues) under one milestone per phase.
 The design and subset grammar are in [`docs/architecture.md`](docs/architecture.md), the phased plan
 in [`docs/PLAN.md`](docs/PLAN.md), ten ADRs in [`docs/decisions/`](docs/decisions/index.md), the
@@ -102,8 +115,7 @@ The full grammar is in [`docs/architecture.md`](docs/architecture.md#the-languag
 
 1. `cargo build`: build `rustycc`. The build script compiles `runtime/shim.c` with `clang`, so the
    Xcode Command Line Tools have to be installed first.
-2. `cargo test`: the whole suite — unit tests, the token-stream snapshot, and the runtime shim
-   compiled, linked, and run.
+2. `cargo test`: the whole suite, every tier of it. About a minute on an M1.
 3. `cargo fmt --check && cargo clippy --all-targets -- -D warnings`: the lint gates CI enforces.
 
 To see what the compiler makes of a file:
@@ -124,8 +136,51 @@ A program that calls `print_int`, `print_char`, or `print_string` declares them 
 preprocessor, so there is no header to include — and the driver links the shim in automatically.
 
 The toolchain is pinned in `rust-toolchain.toml`, so `cargo` installs the right compiler on its own.
-Complete instructions for building and running every tier of tests are a Phase 5 deliverable
-([#38](https://github.com/sid-ak/rusty_c_compiler/issues/38)).
+
+## Testing
+
+Each tier catches what the tier below it cannot. `cargo test` runs all of them; each can also be run
+on its own, which is what to do when one of them is red.
+
+1. `cargo test --lib`: the in-crate unit tests. No C is compiled and nothing is linked, so this is
+   the tier that answers in under a second.
+2. `cargo test --test lexer_snapshots --test parser_snapshots --test sema_snapshots --test codegen_snapshots`:
+   the snapshot tiers — token stream, syntax tree, annotations, and emitted assembly, each compared
+   against a checked-in file.
+    - `cargo insta review`: triage a snapshot diff interactively, then accept it. Never accept a
+      snapshot you have not read.
+3. `cargo test --test codegen_exec`: every corpus program compiled by `rustycc`, run, and checked
+   against the exit code and stdout recorded in its own header.
+4. `cargo test --test differential`: the acceptance suite — every corpus program built by both
+   compilers, both run, and compared. One test per program, so `cargo test --test differential --
+   arrays` scopes to one.
+    - `RUSTYCC_DIFF_TIMEOUT_SECS=30 cargo test --test differential`: raise the wall-clock limit a
+      compiled program is given, on a slow or heavily loaded machine.
+5. `cargo test --test generated`: the same comparison over randomly generated programs.
+    - `RUSTYCC_GENERATED_PROGRAMS=2000 cargo test --test generated`: run more of them.
+    - `RUSTYCC_GENERATED_SEED=<n> cargo test --test generated`: start from the seed a failure
+      printed, which reproduces its program byte for byte.
+6. `cargo test --test invalid_programs`: the programs that must be rejected, each held to the rule
+   it names.
+7. `cargo test --test frontend_no_panic`: the front end against truncated, adversarial, and
+   previously crashing input, on a deliberately small stack.
+8. `cargo test --test harness_self_tests`: the differential harness's own tests, which inject a
+   wrong answer on each comparison axis.
+
+Fuzzing needs a nightly toolchain and `cargo-fuzz`, which the compiler itself does not:
+
+1. `rustup toolchain install nightly && cargo install cargo-fuzz`: once, before the first run.
+2. `./scripts/fuzz.sh lex`: fifteen minutes on the lexer, seeded from every program in the
+   repository. Also `parse` and `frontend`; fifteen minutes each is the documented minimum before a
+   front-end change is called done.
+3. `./scripts/fuzz.sh parse 3600`: run one target for a different number of seconds.
+4. `cargo +nightly fuzz run lex fuzz/artifacts/lex/<crash file>`: replay a crash the run reported.
+5. `cargo +nightly fuzz tmin lex fuzz/artifacts/lex/<crash file>`: minimize it, then check the
+   result into `fuzz/regressions/`, where `cargo test` runs it from then on.
+
+When a differential test fails, the message names a directory holding both binaries, both captures
+of their output, and the assembly `rustycc` produced — so the failure can be taken apart without
+reproducing it first.
 
 The documentation site builds too:
 
