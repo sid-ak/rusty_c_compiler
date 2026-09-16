@@ -116,6 +116,17 @@ pub fn compile(
         });
     }
 
+    let analysis = sema::analyze(&parsed.program);
+    if !analysis.diagnostics.is_empty() {
+        return Err(analysis.diagnostics);
+    }
+
+    if options.stage() == Stage::Annotations {
+        return Ok(Artifacts {
+            dump: Some(analysis.annotations.dump()),
+        });
+    }
+
     Ok(Artifacts::default())
 }
 

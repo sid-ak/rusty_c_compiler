@@ -18,6 +18,8 @@ pub enum Stage {
     Ast,
     /// Stop after semantic analysis, emitting nothing (`--check`).
     Check,
+    /// Stop after semantic analysis and print what it recorded (`--dump-annotations`).
+    Annotations,
     /// Stop after code generation, leaving assembly (`-S`).
     Assembly,
     /// Run the whole pipeline, assemble, and link an executable.
@@ -44,6 +46,10 @@ pub struct Options {
     #[arg(long, group = "stop_after")]
     pub dump_ast: bool,
 
+    /// Stop after semantic analysis and print the annotations it recorded.
+    #[arg(long, group = "stop_after")]
+    pub dump_annotations: bool,
+
     /// Stop after semantic analysis, emitting no output.
     #[arg(long, group = "stop_after")]
     pub check: bool,
@@ -64,6 +70,8 @@ impl Options {
             Stage::Tokens
         } else if self.dump_ast {
             Stage::Ast
+        } else if self.dump_annotations {
+            Stage::Annotations
         } else if self.check {
             Stage::Check
         } else if self.assembly_only {
@@ -81,6 +89,7 @@ impl Options {
             output: None,
             dump_tokens: stage == Stage::Tokens,
             dump_ast: stage == Stage::Ast,
+            dump_annotations: stage == Stage::Annotations,
             check: stage == Stage::Check,
             assembly_only: stage == Stage::Assembly,
             keep_temps: false,
