@@ -5,7 +5,7 @@ the repo root.
 
 Every expected output below was copied from a real run, not written from memory. The page is
 refreshed at the end of each phase, so it covers what the compiler can actually do now rather than
-what it will eventually do — the same discipline the README's status section follows.
+what it will eventually do.
 
 ## Setup
 

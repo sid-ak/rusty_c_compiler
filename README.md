@@ -28,29 +28,28 @@ $ rustycc fib.c -o fib && ./fib
 0 1 1 2 3 5 8 13 21 34
 ```
 
-## Correctness model
+## `clang`: The Oracle for Differential Testing
 
-The accepted language is a subset of C rather than an invented one, so `clang` can compile the same
-translation unit. Correctness is therefore established by differential testing: each corpus program
-is built by both compilers, both binaries are executed under a wall-clock timeout, and stdout,
-stderr, and exit status are compared byte for byte. `clang` supplies the expected result, so no
-expected output is authored by hand.
+`clang` serves as the correctness model or the oracle.
+The accepted language is a subset of C, so `clang` can compile the same translation unit.
 
-This makes the oracle's domain the binding constraint. Where C leaves behavior undefined, neither
-implementation is obliged to do anything in particular, so agreement and disagreement are both
-uninformative. The subset therefore excludes statically detectable undefined behavior, and the
-corpus is constrained to defined programs by review and, for generated programs, by construction.
+Correctness is therefore established by differential testing:
 
-Three tiers run against that model: a curated corpus of sixty-four programs, a seeded generator that
-emits random well-typed programs, and three coverage-guided fuzz targets over the front end.
+- Each corpus program is built by both compilers.
+- Both binaries are executed under a wall-clock timeout.
+- stdout, stderr, and exit status are compared byte for byte.
 
-## Target restriction
+`clang` supplies the expected result, so no expected output is authored by hand.
 
-Code generation targets ARM64 macOS exclusively. The backend emits AArch64 instructions, implements
-Apple's AAPCS64 variant, and writes Mach-O sections and symbol names directly, with no target
-abstraction and no target-independent intermediate representation. Retargeting would invalidate
-substantially all of `src/codegen/`: instruction selection, register conventions, object format, and
-the stack-argument layout Apple packs differently from generic AAPCS64.
+## ARM64 macOS
+
+Code generation targets ARM64 macOS exclusively because that was the development machine at the time.
+
+The backend emits AArch64 instructions, implements Apple's AAPCS64 variant, and writes Mach-O
+sections and symbol names directly, with no target abstraction and no target-independent
+intermediate representation. Retargeting would invalidate substantially all of `src/codegen/`:
+instruction selection, register conventions, object format, and the stack-argument layout Apple
+packs differently from generic AAPCS64.
 
 The restriction buys two properties:
 
@@ -88,9 +87,11 @@ rather than as a generic syntax error.
 
 ## Requirements
 
-Apple Silicon hardware, Rust stable, and the Xcode Command Line Tools
-(`xcode-select --install`), which supply the `clang` used for assembly, linking, and differential
-comparison. The Rust toolchain is pinned in `rust-toolchain.toml`.
+- Apple Silicon hardware
+- Rust stable
+- Xcode Command Line Tools
+    - (`xcode-select --install`), which supply the `clang` used for assembly, linking, and differential comparison.
+    - The Rust toolchain is pinned in `rust-toolchain.toml`.
 
 ```bash
 cargo build                  # compiler, plus runtime/shim.c via the build script
@@ -118,17 +119,30 @@ The subset has no preprocessor. A translation unit declares the runtime function
 
 Worked examples with real output are in [`docs/CHEATSHEET.md`](docs/CHEATSHEET.md).
 
-## Language subset
+## Subset
 
-Supported: `int`, `char`, and `void`; functions with recursion and forward declarations;
-single-dimension arrays, which decay to a pointer only at a parameter boundary; `if`/`else`,
-`while`, `for`, `break`, `continue`, and `return`; full C operator precedence with branch-based
-short-circuit evaluation; and string literals.
+Supports:
 
-Excluded, each reported by name: the preprocessor, `struct`, `switch`, `do`/`while`, the conditional
-operator, compound assignment, bitwise operators, floating point, multi-dimensional arrays, pointer
-variables, `&`, `*`, variadic functions, and `sizeof`. Statically detectable undefined behavior is
-also rejected ([ADR 0008](docs/decisions/0008-reject-undefined-behavior.md)).
+- `int`, `char`, and `void`.
+- Functions with recursion and forward declarations.
+- Single-dimension arrays, which decay to a pointer only at a parameter boundary.
+- `if`/`else`, `while`, `for`, `break`, `continue`, and `return`.
+- Full C operator precedence with branch-based short-circuit evaluation
+- String literals.
+
+Excludes, each reported by name:
+
+- The preprocessor, `struct`, `switch`, `do`/`while`
+- The conditional operator
+- Compound assignment
+- Bitwise operators
+ -Floating point
+- Multi-dimensional arrays
+- Pointer variables, `&`, `*`
+- Variadic functions
+- `sizeof`
+
+Statically detectable undefined behavior is also rejected ([ADR 0008](docs/decisions/0008-reject-undefined-behavior.md)).
 
 Four programs in the invalid corpus are accepted by `clang` and rejected here deliberately. They are
 enumerated with rationale in
@@ -136,16 +150,7 @@ enumerated with rationale in
 that enumeration and the corpus diverge. The grammar is in
 [`docs/architecture.md`](docs/architecture.md#the-language-subset).
 
-## Status
-
-Complete against its stated acceptance criterion: sixty-four corpus programs, compiled by both
-implementations, executed, and compared on stdout, stderr, and exit status, with no known
-mismatches. The run is recorded in [`docs/reports/acceptance.md`](docs/reports/acceptance.md). All
-five phases of [`docs/PLAN.md`](docs/PLAN.md) are complete.
-
-This section is refreshed every iteration and records the project's actual state.
-
-## Source layout
+## Layout
 
 | Path | Contents |
 |---|---|
@@ -192,9 +197,10 @@ Environment overrides, snapshot triage, and crash minimization are documented in
 
 ## Documentation
 
-[Architecture](docs/architecture.md) is the entry point: pipeline, grammar, code generation strategy,
-and testing architecture, each with a dive-deeper section for exact detail. Beyond it,
-[the phase explanations](docs/explanations/index.md) cover the implementation in order,
-[Decisions](docs/decisions/index.md) holds ten ADRs, [the plan](docs/PLAN.md) records scope per
-phase, [the proposal](docs/PROPOSAL.md) is the original statement of intent, and
-[AGENTS.md](AGENTS.md) documents repository conventions.
+- [Architecture](docs/architecture.md) is the entry point: pipeline, grammar, code generation strategy,
+and testing architecture, each with a dive-deeper section for exact detail.
+- [The phase explanations](docs/explanations/index.md) cover the implementation in order
+- [Decisions](docs/decisions/index.md) holds ten ADRs
+- [The plan](docs/PLAN.md) records scope per phase
+- [The proposal](docs/PROPOSAL.md) is the original statement of intent, and
+- [AGENTS.md](AGENTS.md) documents repository conventions.

@@ -40,7 +40,7 @@ affect rather than leaving it unticked.
 - [ ] A change to the accepted language changed the grammar in `docs/architecture.md` first.
 - [ ] Every new diagnostic has a test provoking it and asserting its message and span.
 - [ ] New programs in `tests/programs/` have their `COVERAGE.md` row.
-- [ ] `README.md`'s status section describes what is now true.
+- [ ] `README.md` still describes what is true of the compiler.
 - [ ] Snapshots were read before being accepted.
 
 Closes #

@@ -136,12 +136,11 @@ set and the reported set to matching in both directions.
   script. The docs build fails while a phase diagram is out of date.
 - Keep the architecture document current with the code in the same change, not afterwards. It is the
   first thing anyone reads, and a stale one is worse than none.
-- `README.md` has a "Where it stands today" section that is the project's current-state record.
-  Refresh it in the same change as any iteration that moves the project — phase status, what exists
-  in the repo, and the build and run instructions once they work. Describe what is true, never what
-  is intended; a README claiming a capability the repo does not have is a defect, not a rounding
-  error. Keep it to the state itself, without pinning it to a date or a commit hash, so it reads as
-  current rather than as a stale timestamp.
+- `README.md` describes what is true, never what is intended. A README claiming a capability the
+  repo does not have is a defect, not a rounding error, so a change that alters what the compiler
+  accepts or emits updates it in the same commit. It carries no status section and no date or commit
+  hash: a page that has to be refreshed to stay honest goes stale, and one written in the present
+  tense about what the code does today does not.
 
 ## PRs
 
