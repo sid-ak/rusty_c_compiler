@@ -1,0 +1,523 @@
+//! Execution tests: compile a C program with `rustycc`, run it, and check what it printed.
+//!
+//! Everything here is a question put to the machine. A snapshot says what was emitted and the
+//! assembler says it is legal; only running the program says the answer is right, and for code
+//! generation that is the only question that matters.
+//!
+//! Where an operator is not commutative, the operands are asymmetric on purpose. `2 - 2` is `0`
+//! whichever way round the lowering reads its operands, so a transposed `sub` passes it; `10 - 3`
+//! is `7` one way and `-7` the other.
+
+// clippy.toml exempts test code from the panic-adjacent lints, but only inside `#[test]` bodies;
+// the helpers below are test scaffolding too, and a scratch directory that cannot be created is a
+// broken checkout rather than something to report a diagnostic about.
+#![allow(clippy::expect_used)]
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use rustycc::codegen;
+use rustycc::lexer;
+use rustycc::parser;
+use rustycc::sema;
+
+/// A scratch directory under Cargo's output directory, unique to `name`.
+fn scratch(name: &str) -> PathBuf {
+    let directory = Path::new(env!("OUT_DIR"))
+        .join("codegen-programs")
+        .join(name);
+    fs::create_dir_all(&directory).expect("could not create the scratch directory");
+
+    directory
+}
+
+/// Compiles `source` through every pass, asserting each one accepts it, and returns the assembly.
+fn assemble(source: &str) -> String {
+    let lexed = lexer::lex(source.as_bytes());
+    assert!(
+        lexed.diagnostics.is_empty(),
+        "does not lex: {:?}",
+        lexed.diagnostics
+    );
+
+    let parsed = parser::parse(&lexed.tokens);
+    assert!(
+        parsed.diagnostics.is_empty(),
+        "does not parse: {:?}",
+        parsed.diagnostics
+    );
+
+    let analysis = sema::analyze(&parsed.program);
+    assert!(
+        analysis.is_accepted(),
+        "does not analyze: {:?}",
+        analysis
+            .diagnostics
+            .iter()
+            .map(|diagnostic| &diagnostic.message)
+            .collect::<Vec<_>>()
+    );
+
+    let generated = codegen::generate(&parsed.program, &analysis.annotations);
+    assert!(
+        generated.diagnostics.is_empty(),
+        "does not lower: {:?}",
+        generated
+            .diagnostics
+            .iter()
+            .map(|diagnostic| &diagnostic.message)
+            .collect::<Vec<_>>()
+    );
+
+    generated.assembly
+}
+
+/// Compiles `source`, links it with a C `main` that prints `answer()`, runs it, and returns stdout.
+///
+/// The C driver exists so a test can read a full 32-bit result. An exit code is masked to eight
+/// bits, which would quietly turn `256` into `0` and `-7` into `249`.
+fn answer_of(name: &str, source: &str) -> String {
+    let assembly = assemble(source);
+    let directory = scratch(name);
+    let assembly_path = directory.join("out.s");
+    let driver = directory.join("driver.c");
+    let binary = directory.join("program");
+
+    fs::write(&assembly_path, &assembly).expect("could not write the assembly");
+    fs::write(
+        &driver,
+        "#include <stdio.h>\nint answer(void);\nint main(void) { printf(\"%d\\n\", answer()); return 0; }\n",
+    )
+    .expect("could not write the driver");
+
+    let built = Command::new("clang")
+        .args(["-std=c99", "-O0"])
+        .arg(&assembly_path)
+        .arg(&driver)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .expect("could not run clang; run xcode-select --install");
+    assert!(
+        built.status.success(),
+        "linking failed:\n{}\n--- assembly ---\n{assembly}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+
+    let run = Command::new(&binary)
+        .output()
+        .expect("could not run the program");
+    assert!(
+        run.status.success(),
+        "the program exited with {:?}",
+        run.status.code()
+    );
+
+    String::from_utf8_lossy(&run.stdout).trim_end().to_owned()
+}
+
+/// Wraps `body` as the whole of `int answer(void)`.
+fn answer(name: &str, body: &str) -> String {
+    answer_of(name, &format!("int answer(void) {{\n{body}\n}}\n"))
+}
+
+/// Arithmetic groups the way C says it does, and each operator computes what it should.
+#[test]
+fn arithmetic_and_precedence() {
+    let cases = [
+        ("literal", "return 42;", "42"),
+        ("addition", "return 2 + 3;", "5"),
+        ("precedence", "return 1 + 2 * 3;", "7"),
+        ("precedence the other way", "return 2 * 3 + 1;", "7"),
+        ("parentheses override", "return (1 + 2) * 3;", "9"),
+        ("left associativity", "return 10 - 3 - 2;", "5"),
+        ("nested to four levels", "return 1 + 2 * (3 + 4 * 2);", "23"),
+        ("unary minus", "return -7;", "-7"),
+        ("unary minus on an expression", "return -(3 + 4);", "-7"),
+        ("unary plus", "return +7;", "7"),
+        ("double negation", "return - -7;", "7"),
+        ("logical not of zero", "return !0;", "1"),
+        ("logical not of a value", "return !5;", "0"),
+        ("logical not twice", "return !!5;", "1"),
+    ];
+
+    for (shape, body, expected) in cases {
+        assert_eq!(answer(&slug(shape), body), expected, "{shape}");
+    }
+}
+
+/// Non-commutative operators read their operands in source order.
+///
+/// Every case here is asymmetric. A lowering that swapped its operands would still pass `2 - 2` or
+/// `a < a`, which is why none of those appear.
+#[test]
+fn non_commutative_operators_read_left_then_right() {
+    let cases = [
+        ("subtraction", "return 10 - 3;", "7"),
+        ("division", "return 10 / 3;", "3"),
+        ("remainder", "return 10 % 3;", "1"),
+        ("less than, true", "return 1 < 2;", "1"),
+        ("less than, false", "return 2 < 1;", "0"),
+        ("greater than, true", "return 2 > 1;", "1"),
+        ("greater than, false", "return 1 > 2;", "0"),
+        ("less or equal, below", "return 1 <= 2;", "1"),
+        ("less or equal, above", "return 2 <= 1;", "0"),
+        ("greater or equal, above", "return 2 >= 1;", "1"),
+        ("greater or equal, below", "return 1 >= 2;", "0"),
+        ("equality, unequal", "return 1 == 2;", "0"),
+        ("inequality, unequal", "return 1 != 2;", "1"),
+    ];
+
+    for (shape, body, expected) in cases {
+        assert_eq!(answer(&slug(shape), body), expected, "{shape}");
+    }
+}
+
+/// Division and remainder truncate toward zero, which is what C requires of negative operands.
+#[test]
+fn division_and_remainder_truncate_toward_zero() {
+    let cases = [
+        ("negative dividend", "return -10 / 3;", "-3"),
+        ("negative divisor", "return 10 / -3;", "-3"),
+        ("both negative", "return -10 / -3;", "3"),
+        ("negative remainder", "return -10 % 3;", "-1"),
+        ("remainder of a negative divisor", "return 10 % -3;", "1"),
+        (
+            "remainder sign follows the dividend",
+            "return -7 % 2;",
+            "-1",
+        ),
+    ];
+
+    for (shape, body, expected) in cases {
+        assert_eq!(answer(&slug(shape), body), expected, "{shape}");
+    }
+}
+
+/// Constants at the edges of `int` survive the immediate-building path.
+#[test]
+fn constants_at_the_edges_of_int() {
+    let cases = [
+        ("zero", "return 0;", "0"),
+        ("small", "return 255;", "255"),
+        ("just past a byte", "return 256;", "256"),
+        ("just past sixteen bits", "return 65536;", "65536"),
+        ("large", "return 123456789;", "123456789"),
+        ("int max", "return 2147483647;", "2147483647"),
+        ("int min", "return -2147483647 - 1;", "-2147483648"),
+        ("negative large", "return -123456789;", "-123456789"),
+    ];
+
+    for (shape, body, expected) in cases {
+        assert_eq!(answer(&slug(shape), body), expected, "{shape}");
+    }
+}
+
+/// Locals are stored and read back, and assignment yields the value assigned.
+#[test]
+fn locals_store_and_load() {
+    let cases = [
+        ("declare and read", "int x; x = 5; return x;", "5"),
+        ("declare with an initializer", "int x = 5; return x;", "5"),
+        ("reassign", "int x = 1; x = 9; return x;", "9"),
+        (
+            "assignment is an expression",
+            "int x; int y; y = (x = 3); return x + y;",
+            "6",
+        ),
+        (
+            "chained assignment",
+            "int x; int y; x = y = 4; return x + y;",
+            "8",
+        ),
+        (
+            "arithmetic on locals",
+            "int a = 10; int b = 3; return a - b;",
+            "7",
+        ),
+        (
+            "shadowing in a block",
+            "int x = 1; { int x = 2; x = x + 1; } return x;",
+            "1",
+        ),
+    ];
+
+    for (shape, body, expected) in cases {
+        assert_eq!(answer(&slug(shape), body), expected, "{shape}");
+    }
+}
+
+/// `&&` and `||` skip the right operand when the left one already decides the answer.
+///
+/// Proved by side effect rather than by result: the right operand increments a variable that is
+/// then returned, so a lowering that evaluated both sides gives a different number.
+#[test]
+fn short_circuit_skips_the_right_operand() {
+    let cases = [
+        (
+            "and stops at a false left",
+            "int n = 0; int r = (0 && (n = 1)); return n;",
+            "0",
+        ),
+        (
+            "and evaluates a true left",
+            "int n = 0; int r = (1 && (n = 1)); return n;",
+            "1",
+        ),
+        (
+            "or stops at a true left",
+            "int n = 0; int r = (1 || (n = 1)); return n;",
+            "0",
+        ),
+        (
+            "or evaluates a false left",
+            "int n = 0; int r = (0 || (n = 1)); return n;",
+            "1",
+        ),
+    ];
+
+    for (shape, body, expected) in cases {
+        assert_eq!(answer(&slug(shape), body), expected, "{shape}");
+    }
+}
+
+/// `&&` and `||` produce exactly `0` or `1`, not whichever operand decided the answer.
+#[test]
+fn logical_operators_normalize_to_zero_or_one() {
+    let cases = [
+        ("and of two truthy values", "return 3 && 5;", "1"),
+        ("and with a false right", "return 3 && 0;", "0"),
+        ("or of a truthy left", "return 3 || 5;", "1"),
+        ("or of two false values", "return 0 || 0;", "0"),
+        ("or reaching a truthy right", "return 0 || 7;", "1"),
+    ];
+
+    for (shape, body, expected) in cases {
+        assert_eq!(answer(&slug(shape), body), expected, "{shape}");
+    }
+}
+
+/// Prefix and postfix increment differ in the value they produce, not only in what they store.
+#[test]
+fn prefix_and_postfix_differ_in_the_value_they_produce() {
+    let cases = [
+        (
+            "prefix increment yields the new value",
+            "int i = 5; return ++i;",
+            "6",
+        ),
+        (
+            "postfix increment yields the old value",
+            "int i = 5; return i++;",
+            "5",
+        ),
+        (
+            "prefix decrement yields the new value",
+            "int i = 5; return --i;",
+            "4",
+        ),
+        (
+            "postfix decrement yields the old value",
+            "int i = 5; return i--;",
+            "5",
+        ),
+        ("postfix still stores", "int i = 5; i++; return i;", "6"),
+        ("prefix still stores", "int i = 5; ++i; return i;", "6"),
+        (
+            "difference in one expression",
+            "int i = 5; return (i++) + (i++);",
+            "11",
+        ),
+    ];
+
+    for (shape, body, expected) in cases {
+        assert_eq!(answer(&slug(shape), body), expected, "{shape}");
+    }
+}
+
+/// Arrays index by element, read and write, and scale the index by the element's size.
+#[test]
+fn arrays_index_read_and_write() {
+    let cases = [
+        (
+            "read an initialized element",
+            "int a[3] = {7, 8, 9}; return a[1];",
+            "8",
+        ),
+        (
+            "read the last element",
+            "int a[3] = {7, 8, 9}; return a[2];",
+            "9",
+        ),
+        ("write then read", "int a[3]; a[0] = 4; return a[0];", "4"),
+        (
+            "write past the first element",
+            "int a[3]; a[2] = 6; a[0] = 1; return a[2];",
+            "6",
+        ),
+        (
+            "index by a variable",
+            "int a[3] = {7, 8, 9}; int i = 2; return a[i];",
+            "9",
+        ),
+        (
+            "index by an expression",
+            "int a[3] = {7, 8, 9}; return a[1 + 1];",
+            "9",
+        ),
+        (
+            "elements are independent",
+            "int a[2]; a[0] = 1; a[1] = 2; return a[0] * 10 + a[1];",
+            "12",
+        ),
+    ];
+
+    for (shape, body, expected) in cases {
+        assert_eq!(answer(&slug(shape), body), expected, "{shape}");
+    }
+}
+
+/// A `char` occupies one byte and sign-extends when it is read back.
+#[test]
+fn chars_store_in_one_byte_and_sign_extend() {
+    let cases = [
+        ("a character literal", "char c = 'A'; return c;", "65"),
+        ("arithmetic promotes", "char c = 'a'; return c - 'A';", "32"),
+        (
+            "a value above 127 is negative",
+            "char c = 200; return c;",
+            "-56",
+        ),
+        (
+            "a char array element",
+            "char a[3]; a[1] = 'z'; return a[1];",
+            "122",
+        ),
+        (
+            "char elements are one byte apart",
+            "char a[3]; a[0] = 1; a[1] = 2; a[2] = 3; return a[0] + a[1] * 10 + a[2] * 100;",
+            "321",
+        ),
+        (
+            "comparison against a literal",
+            "char c = 'm'; return c == 'm';",
+            "1",
+        ),
+    ];
+
+    for (shape, body, expected) in cases {
+        assert_eq!(answer(&slug(shape), body), expected, "{shape}");
+    }
+}
+
+/// A deeply nested expression gives every level its own temporary.
+///
+/// The value is chosen so that any two levels sharing a slot produces a different number rather
+/// than a crash.
+#[test]
+fn nested_expressions_do_not_share_temporaries() {
+    assert_eq!(
+        answer("deep", "return 1 + (2 + (3 + (4 + (5 + (6 + (7 + 8))))));"),
+        "36"
+    );
+    assert_eq!(
+        answer("deep-subtraction", "return 100 - (50 - (25 - (10 - 5)));"),
+        "70"
+    );
+}
+
+/// A name for a scratch directory, made from a test case's description.
+fn slug(shape: &str) -> String {
+    shape.replace(' ', "-")
+}
+
+/// Assembles `assembly` with `clang -c -Werror`, failing on anything at all on stderr.
+fn assembles_cleanly(name: &str, assembly: &str) {
+    let directory = scratch(name);
+    let path = directory.join("out.s");
+    fs::write(&path, assembly).expect("could not write the assembly");
+
+    let assembled = Command::new("clang")
+        .args(["-c", "-Werror"])
+        .arg(&path)
+        .arg("-o")
+        .arg(directory.join("out.o"))
+        .output()
+        .expect("could not run clang");
+
+    assert!(
+        assembled.status.success() && assembled.stderr.is_empty(),
+        "{name} did not assemble cleanly:\n{}\n--- assembly ---\n{assembly}",
+        String::from_utf8_lossy(&assembled.stderr)
+    );
+}
+
+/// One snapshot fixture: a name, and the program whose lowering it pins.
+const CONSTRUCTS: &[(&str, &str)] = &[
+    ("arithmetic", "int answer(void) { return 1 + 2 * 3; }"),
+    ("subtraction", "int answer(void) { return 10 - 3; }"),
+    ("remainder", "int answer(void) { return 10 % 3; }"),
+    ("comparison", "int answer(void) { return 2 < 1; }"),
+    (
+        "short_circuit_and",
+        "int answer(void) { int n = 0; return 0 && (n = 1); }",
+    ),
+    (
+        "short_circuit_or",
+        "int answer(void) { int n = 0; return 1 || (n = 1); }",
+    ),
+    (
+        "local_round_trip",
+        "int answer(void) { int x = 7; return x; }",
+    ),
+    (
+        "array_index",
+        "int answer(void) { int a[3]; a[1] = 5; return a[1]; }",
+    ),
+    (
+        "char_round_trip",
+        "int answer(void) { char c = 'A'; return c; }",
+    ),
+    (
+        "postfix_increment",
+        "int answer(void) { int i = 5; return i++; }",
+    ),
+    (
+        "prefix_increment",
+        "int answer(void) { int i = 5; return ++i; }",
+    ),
+    ("unary", "int answer(void) { return -!0; }"),
+    ("large_constant", "int answer(void) { return 123456789; }"),
+];
+
+/// The emitted assembly for each construct, pinned so a regression is a readable diff.
+#[test]
+fn construct_snapshots() {
+    for (name, source) in CONSTRUCTS {
+        insta::assert_snapshot!(*name, assemble(source), source);
+    }
+}
+
+/// Every construct's assembly is something the assembler accepts without comment.
+///
+/// A snapshot taken after a malformed directive was introduced would pin the malformed version
+/// quite happily, so the two checks are kept separate.
+#[test]
+fn every_construct_assembles_cleanly() {
+    for (name, source) in CONSTRUCTS {
+        assembles_cleanly(name, &assemble(source));
+    }
+}
+
+/// Lowering the same program twice produces the same bytes.
+#[test]
+fn lowering_is_deterministic() {
+    for (name, source) in CONSTRUCTS {
+        assert_eq!(
+            assemble(source),
+            assemble(source),
+            "{name} differed between runs"
+        );
+    }
+}

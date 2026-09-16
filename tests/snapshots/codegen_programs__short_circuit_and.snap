@@ -1,0 +1,31 @@
+---
+source: tests/codegen_programs.rs
+expression: "int answer(void) { int n = 0; return 0 && (n = 1); }"
+---
+	.section	__TEXT,__text,regular,pure_instructions
+	.globl	_answer
+	.p2align	2
+_answer:
+	stp x29, x30, [sp, #-48]!
+	mov x29, sp
+	movz w0, #0
+	str w0, [x29, #16]
+	movz w0, #0
+	cbz w0, Land_decided_1
+	add x0, x29, #16
+	str x0, [x29, #32]
+	movz w0, #1
+	ldr x2, [x29, #32]
+	str w0, [x2]
+	cbz w0, Land_decided_1
+	mov w0, #1
+	b Land_end_2
+Land_decided_1:
+	mov w0, #0
+Land_end_2:
+	b Lanswer_return_0
+Lanswer_return_0:
+	mov sp, x29
+	ldp x29, x30, [sp], #48
+	ret
+.subsections_via_symbols

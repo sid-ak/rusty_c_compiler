@@ -221,6 +221,39 @@ impl Emitter {
         }
     }
 
+    /// Puts a 32-bit literal into a `w` register.
+    ///
+    /// A `w` register's `movk` only shifts by sixteen, so a word is two pieces rather than four.
+    /// The value is taken as its bit pattern, which is what makes a negative constant work without
+    /// a negation: `-1` is `0xffffffff`, built from two pieces like any other number.
+    pub fn load_word_immediate(&mut self, register: &str, value: i32) {
+        #[expect(
+            clippy::cast_sign_loss,
+            reason = "the bit pattern is the point; a negative constant is built from its two halves"
+        )]
+        let bits = value as u32;
+
+        self.instruction(&format!("movz {register}, #{}", bits & 0xffff));
+
+        let high = bits >> 16;
+        if high != 0 {
+            self.instruction(&format!("movk {register}, #{high}, lsl #16"));
+        }
+    }
+
+    /// Puts the address of the frame slot at `offset` into `register`.
+    pub fn frame_address(&mut self, register: &str, offset: u64) {
+        // `add` carries a twelve-bit immediate, so anything larger is built first.
+        if offset <= 4095 {
+            self.instruction(&format!("add {register}, x29, #{offset}"));
+
+            return;
+        }
+
+        self.load_immediate(SCRATCH, offset);
+        self.instruction(&format!("add {register}, x29, {SCRATCH}"));
+    }
+
     /// Loads `register` from `offset` bytes into the current frame.
     pub fn load_from_frame(&mut self, register: &str, width: Width, offset: u64) {
         let instruction = width.load();
