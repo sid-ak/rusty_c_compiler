@@ -1,196 +1,200 @@
 # Rusty C Compiler
 
-A compiler for a well-defined subset of C, written in Rust, emitting ARM64 assembly for Apple
-Silicon macOS and linking it into a real native executable.
+An ahead-of-time compiler for a defined subset of C, implemented in Rust, targeting ARM64 macOS on
+Apple Silicon. It lowers source to AArch64 assembly and drives the system toolchain to assemble and
+link a native Mach-O executable.
 
-C was chosen over a toy language so that `clang` can serve as the testing oracle: every corpus
-program is compiled by both compilers, run, and compared. That comparison is the definition of
-correct.
+```c
+void print_int(int n);
+void print_char(char c);
+
+int fib(int n) {
+    if (n < 2) { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+
+int main(void) {
+    for (int i = 0; i < 10; i = i + 1) {
+        print_int(fib(i));
+        print_char(' ');
+    }
+    print_char('\n');
+    return 0;
+}
+```
+
+```console
+$ rustycc fib.c -o fib && ./fib
+0 1 1 2 3 5 8 13 21 34
+```
+
+## Correctness model
+
+The accepted language is a subset of C rather than an invented one, so `clang` can compile the same
+translation unit. Correctness is therefore established by differential testing: each corpus program
+is built by both compilers, both binaries are executed under a wall-clock timeout, and stdout,
+stderr, and exit status are compared byte for byte. `clang` supplies the expected result, so no
+expected output is authored by hand.
+
+This makes the oracle's domain the binding constraint. Where C leaves behavior undefined, neither
+implementation is obliged to do anything in particular, so agreement and disagreement are both
+uninformative. The subset therefore excludes statically detectable undefined behavior, and the
+corpus is constrained to defined programs by review and, for generated programs, by construction.
+
+Three tiers run against that model: a curated corpus of sixty-four programs, a seeded generator that
+emits random well-typed programs, and three coverage-guided fuzz targets over the front end.
+
+## Target restriction
+
+Code generation targets ARM64 macOS exclusively. The backend emits AArch64 instructions, implements
+Apple's AAPCS64 variant, and writes Mach-O sections and symbol names directly, with no target
+abstraction and no target-independent intermediate representation. Retargeting would invalidate
+substantially all of `src/codegen/`: instruction selection, register conventions, object format, and
+the stack-argument layout Apple packs differently from generic AAPCS64.
+
+The restriction buys two properties:
+
+- A backend that reads end to end. Target-specific facts — Mach-O's leading underscore, 16-byte
+  stack alignment at call sites, `__TEXT,__cstring` — appear where they are used rather than behind
+  an abstraction intended to make them interchangeable.
+- In-process native testing. The suite compiles and executes programs as part of `cargo test`, with
+  no emulator, cross-linker, or remote runner, and with `clang` on the same machine acting as oracle
+  for the same architecture.
+
+The trade-off is recorded in [ADR 0003](docs/decisions/0003-single-target-arm64-macos.md).
+
+## Diagnostics
+
+Diagnostics are accumulated rather than fatal: a translation unit is analyzed to completion and every
+defect is reported in source order. Each carries a span rendered as a caret under the offending
+text, and collisions carry a secondary span pointing at the earlier declaration.
+
+```console
+$ rustycc --check oops.c
+oops.c:3:9: error: redeclaration of 'total' in this scope
+    int total;
+        ^~~~~
+oops.c:2:9: note: previous declaration of 'total' is here
+    int total;
+        ^~~~~
+oops.c:4:12: error: undeclared identifier 'missing'
+    return missing;
+           ^~~~~~~
+rustycc: 2 errors generated
+```
+
+Constructs that are valid C but outside the subset — `struct`, `switch`, `?:` — are reported by name
+rather than as a generic syntax error.
+
+## Requirements
+
+Apple Silicon hardware, Rust stable, and the Xcode Command Line Tools
+(`xcode-select --install`), which supply the `clang` used for assembly, linking, and differential
+comparison. The Rust toolchain is pinned in `rust-toolchain.toml`.
+
+```bash
+cargo build                  # compiler, plus runtime/shim.c via the build script
+cargo test                   # all tiers; approximately one minute on an M1
+cargo install --path .       # optional: place rustycc on PATH
+```
+
+`cargo install --path .` links the installed binary against the shim object under `target/`, so
+`cargo clean` invalidates it until the install is repeated.
+
+The subset has no preprocessor. A translation unit declares the runtime functions it uses —
+`print_int`, `print_char`, `print_string` — and the driver links the shim automatically.
+
+## Usage
+
+| Flag | Effect |
+|---|---|
+| `--dump-tokens` | token stream with source spans |
+| `--dump-ast` | syntax tree |
+| `--dump-annotations` | resolved types, bindings, conversions, frame layouts, interned literals |
+| `--check` | front end only; exit status reports acceptance |
+| `-S` | AArch64 assembly |
+| `-c` | object file |
+| `-o <file>` | output path |
+
+Worked examples with real output are in [`docs/CHEATSHEET.md`](docs/CHEATSHEET.md).
+
+## Language subset
+
+Supported: `int`, `char`, and `void`; functions with recursion and forward declarations;
+single-dimension arrays, which decay to a pointer only at a parameter boundary; `if`/`else`,
+`while`, `for`, `break`, `continue`, and `return`; full C operator precedence with branch-based
+short-circuit evaluation; and string literals.
+
+Excluded, each reported by name: the preprocessor, `struct`, `switch`, `do`/`while`, the conditional
+operator, compound assignment, bitwise operators, floating point, multi-dimensional arrays, pointer
+variables, `&`, `*`, variadic functions, and `sizeof`. Statically detectable undefined behavior is
+also rejected ([ADR 0008](docs/decisions/0008-reject-undefined-behavior.md)).
+
+Four programs in the invalid corpus are accepted by `clang` and rejected here deliberately. They are
+enumerated with rationale in
+[the architecture](docs/architecture.md#where-this-subset-is-stricter-than-c), and a test fails if
+that enumeration and the corpus diverge. The grammar is in
+[`docs/architecture.md`](docs/architecture.md#the-language-subset).
 
 ## Status
 
-`rustycc` compiles a subset of C to a native macOS executable, and it is functionally complete
-against its own definition of done: every program in the corpus is built by both this compiler and
-`clang -O0 -std=c99`, both binaries are run, and their output and exit status are compared byte for
-byte. Sixty-four programs, no known mismatches.
+Complete against its stated acceptance criterion: sixty-four corpus programs, compiled by both
+implementations, executed, and compared on stdout, stderr, and exit status, with no known
+mismatches. The run is recorded in [`docs/reports/acceptance.md`](docs/reports/acceptance.md). All
+five phases of [`docs/PLAN.md`](docs/PLAN.md) are complete.
 
-The pipeline runs end to end: source text to tokens, tokens to a syntax tree, the tree to types and
-bindings, and those to ARM64 assembly that `clang` assembles and links against the runtime shim.
-`--dump-tokens`, `--dump-ast`, `--dump-annotations`, and `-S` print what each stage made of a file;
-`--check` answers whether a program is accepted, with diagnostics carrying a caret under the
-offending text — one per mistake, in source order, and a second caret under the earlier declaration
-where a name collides with one.
+This section is refreshed every iteration and records the project's actual state.
 
-Beyond the hand-written corpus, a seeded generator writes random well-typed programs and puts them
-through the same comparison, and three `cargo-fuzz` targets run raw bytes through the lexer, the
-parser, and the whole front end. The acceptance run is recorded in
-[`docs/reports/acceptance.md`](docs/reports/acceptance.md).
+## Source layout
 
-In the repo:
-
-- `src/diagnostics.rs` — spans over byte offsets, a source map that resolves one to a line and
-  column, the caret renderer every pass reports through, notes that can point at a second place in
-  the file, and a bag that collects diagnostics and returns them in source order.
-- `src/lexer/` — the token set and keyword table, and a scanner over raw bytes that always
-  terminates, never panics, decodes literals once, and resynchronizes after a malformed construct so
-  a file with four mistakes reports four of them.
-- `src/ast.rs` — the node types the parser builds and the two later passes read, each carrying a
-  span and an identity, with no field for anything a later pass works out; plus the deterministic
-  S-expression dump that parser tests assert against.
-- `src/parser/` — recursive descent over declarations and statements, precedence climbing over
-  expressions, panic-mode recovery that provably consumes a token per step, and a limit on how
-  deep the tree may grow that turns a hostile input into a diagnostic rather than a stack overflow.
-- `src/sema/` — the type model and its promotion, decay, and compatibility rules; a scope stack
-  resolving every identifier; a two-pass walk that registers the top level before it walks any body,
-  so a call to a function defined later in the file resolves; thirty-one checks, each with its own
-  message and span; and the annotation tables code generation reads.
-- `src/codegen/` — the assembly emitter and Mach-O conventions, stack frame layout with a fixed slot
-  for every value, expression lowering where each instruction reads its operands in source order,
-  control flow with a loop-context stack, Apple's ARM64 calling convention, and the data sections.
-- `src/driver.rs` — assembling and linking through `clang`, with intermediates removed however the
-  run ends and a toolchain failure reported in the toolchain's own words.
-- `tests/programs/` — sixty-four subset-C programs covering the grammar and the pairs of features
-  that have to agree with each other, each carrying the exit code and stdout `clang` produces for
-  it, and thirty-one in `invalid/` that must stay rejected. Both have a coverage matrix CI holds
-  them to.
-- `tests/differential.rs` and `tests/harness/` — each program built both ways, run under a timeout,
-  and compared on stdout, stderr, and exit status, with a mismatch, a build failure, and a hang kept
-  apart as three different answers. `tests/harness_self_tests.rs` injects a wrong answer on every
-  axis, because a harness that cannot fail proves nothing.
-- `tests/generator/` and `tests/generated.rs` — random well-typed programs, kept inside defined
-  behavior by interval arithmetic rather than by hoping, put through the same comparison.
-- `fuzz/` — three `cargo-fuzz` targets over the front end, a script that seeds a run from everything
-  already in the repository, and the place a minimized crash goes to become an ordinary test.
-- `runtime/shim.c` — `print_int`, `print_char`, and `print_string` on `write(2)`, compiled once by
-  the build script into the object both compilers link against.
-- `.github/workflows/` — fmt, clippy, test, differential, and docs on an Apple Silicon runner behind
-  a preflight that checks the C toolchain resolves; and a nightly schedule for the runs measured in
-  minutes rather than seconds.
-
-Four programs in `tests/programs/invalid/` are real C that `clang` builds and this compiler rejects
-on purpose. They are listed in
-[`docs/architecture.md`](docs/architecture.md#where-this-subset-is-stricter-than-c), and a test fails
-if that list and the corpus disagree.
-
-All five phases of [`docs/PLAN.md`](docs/PLAN.md) are complete; the work is tracked as
-[GitHub issues](https://github.com/sid-ak/rusty_c_compiler/issues) under one milestone per phase.
-The design and subset grammar are in [`docs/architecture.md`](docs/architecture.md), the phased plan
-in [`docs/PLAN.md`](docs/PLAN.md), ten ADRs in [`docs/decisions/`](docs/decisions/index.md), the
-commands for driving it by hand in [`docs/CHEATSHEET.md`](docs/CHEATSHEET.md), and the working
-conventions in [`AGENTS.md`](AGENTS.md).
-
-This section is refreshed every iteration, so it records where the project actually is.
-
-## Scope
-
-### Subset
-
-- `int`, `char`, and `void`
-- Functions with recursion and forward declarations
-- single-dimension arrays that decay to a pointer only at a call boundary
-- `if`/`else`, `while`, `for`, `break`, `continue`, `return`
-- C precedence with real short-circuiting;
-- string literals
-
-### Out of Subset
-
-Out of scope, each with its own diagnostic rather than a parse error:
-
-- The preprocessor, `struct`, `switch`, `do`/`while`, the ternary, compound assignment, bitwise
-  operators, floating point, multi-dimensional arrays, pointer variables, `&`, `*`, variadics, and
-  `sizeof`.
-- Constructs C leaves undefined are also rejected, since undefined behavior cannot be differentially
-  tested ([ADR 0008](docs/decisions/0008-reject-undefined-behavior.md)).
-
-The full grammar is in [`docs/architecture.md`](docs/architecture.md#the-language-subset).
-
-## Prerequisites
-
-- Apple Silicon Mac
-- Xcode Command Line Tools (`xcode-select --install`)
-- Rust stable
-- Nightly is needed only for `cargo-fuzz`
-
-## Building
-
-1. `cargo build`: build `rustycc`. The build script compiles `runtime/shim.c` with `clang`, so the
-   Xcode Command Line Tools have to be installed first.
-2. `cargo test`: the whole suite, every tier of it. About a minute on an M1.
-3. `cargo fmt --check && cargo clippy --all-targets -- -D warnings`: the lint gates CI enforces.
-
-To see what the compiler makes of a file:
-
-1. `./target/debug/rustycc program.c --dump-tokens`: print each token with the source range it came
-   from.
-2. `./target/debug/rustycc program.c --dump-ast`: print the syntax tree the parser built.
-3. `./target/debug/rustycc program.c --dump-annotations`: print the types, conversions, bindings,
-   frame inventories, and interned string literals analysis recorded.
-4. `./target/debug/rustycc --check program.c`: run the whole front end and answer with an exit code,
-   printing nothing when the program is accepted.
-5. `./target/debug/rustycc --check broken.c`: on a rejected file, print a diagnostic with the
-   offending line and a caret, and exit non-zero.
-6. `./target/debug/rustycc program.c -S -o program.s`: write the ARM64 assembly and no binary.
-7. `./target/debug/rustycc program.c -o program && ./program`: compile, link, and run it.
-
-A program that calls `print_int`, `print_char`, or `print_string` declares them itself — there is no
-preprocessor, so there is no header to include — and the driver links the shim in automatically.
-
-The toolchain is pinned in `rust-toolchain.toml`, so `cargo` installs the right compiler on its own.
+| Path | Contents |
+|---|---|
+| `src/diagnostics.rs` | spans, source map, caret renderer, spanned notes, diagnostic bag |
+| `src/lexer/` | byte scanner with literal decoding and error resynchronization |
+| `src/ast.rs` | node types, immutable after parsing, and the S-expression dump |
+| `src/parser/` | recursive descent and precedence climbing, with recovery and a depth bound |
+| `src/sema/` | type model, scope stack, two-pass analysis, thirty-one checks, annotation tables |
+| `src/codegen/` | emitter, frame layout, expression and statement lowering, calls, data sections |
+| `src/driver.rs` | toolchain invocation, temporary-file management, error propagation |
+| `runtime/shim.c` | `print_int`, `print_char`, `print_string`, implemented on `write(2)` |
+| `tests/programs/` | sixty-four valid programs and thirty-one that must be rejected |
+| `tests/differential.rs`, `tests/harness/` | the comparison harness and its self-tests |
+| `tests/generator/` | random well-typed program generation bounded by interval arithmetic |
+| `fuzz/` | three `cargo-fuzz` targets over the front end |
 
 ## Testing
 
-Each tier catches what the tier below it cannot. `cargo test` runs all of them; each can also be run
-on its own, which is what to do when one of them is red.
+`cargo test` runs every tier; each is independently invocable.
 
-1. `cargo test --lib`: the in-crate unit tests. No C is compiled and nothing is linked, so this is
-   the tier that answers in under a second.
+1. `cargo test --lib`: in-crate unit tests, no compilation or linking.
 2. `cargo test --test lexer_snapshots --test parser_snapshots --test sema_snapshots --test codegen_snapshots`:
-   the snapshot tiers — token stream, syntax tree, annotations, and emitted assembly, each compared
-   against a checked-in file.
-    - `cargo insta review`: triage a snapshot diff interactively, then accept it. Never accept a
-      snapshot you have not read.
-3. `cargo test --test codegen_exec`: every corpus program compiled by `rustycc`, run, and checked
-   against the exit code and stdout recorded in its own header.
-4. `cargo test --test differential`: the acceptance suite — every corpus program built by both
-   compilers, both run, and compared. Each program is its own test, so a name filter scopes to one.
-    - `RUSTYCC_DIFF_TIMEOUT_SECS=30 cargo test --test differential`: raise the wall-clock limit a
-      compiled program is given, on a slow or heavily loaded machine.
-5. `cargo test --test generated`: the same comparison over randomly generated programs.
-    - `RUSTYCC_GENERATED_PROGRAMS=2000 cargo test --test generated`: run more of them.
-    - `RUSTYCC_GENERATED_SEED=<n> cargo test --test generated`: start from the seed a failure
-      printed, which reproduces its program byte for byte.
-6. `cargo test --test invalid_programs`: the programs that must be rejected, each held to the rule
-   it names.
-7. `cargo test --test frontend_no_panic`: the front end against every corpus program cut short at
-   every byte, the hand-written adversarial inputs, and anything a past fuzz run crashed on, each
-   held to finishing rather than only to not crashing.
-8. `cargo test --test harness_self_tests`: the differential harness's own tests, which inject a
-   wrong answer on each comparison axis.
+   token stream, syntax tree, annotations, and emitted assembly against checked-in snapshots.
+3. `cargo test --test codegen_exec`: corpus programs compiled, executed, and checked against
+   recorded expectations.
+4. `cargo test --test differential`: the acceptance suite, one test per program.
+5. `cargo test --test generated`: the same comparison over generated programs.
+6. `cargo test --test invalid_programs`: programs that must be rejected, each against its rule.
+7. `cargo test --test frontend_no_panic`: truncated, adversarial, and regression inputs.
+8. `cargo test --test harness_self_tests`: fault injection on each comparison axis of the harness.
 
-Fuzzing needs a nightly toolchain and `cargo-fuzz`, which the compiler itself does not:
+A differential failure reports a directory containing both binaries, both output captures, and the
+emitted assembly, so it can be diagnosed without reproduction.
 
-1. `rustup toolchain install nightly && cargo install cargo-fuzz`: once, before the first run.
-2. `./scripts/fuzz.sh lex`: fifteen minutes on the lexer, seeded from every program in the
-   repository. Also `parse` and `frontend`; fifteen minutes each is the documented minimum before a
-   front-end change is called done.
-3. `./scripts/fuzz.sh parse 3600`: run one target for a different number of seconds.
-4. `cargo +nightly fuzz run lex fuzz/artifacts/lex/<crash file>`: replay a crash the run reported.
-5. `cargo +nightly fuzz tmin lex fuzz/artifacts/lex/<crash file>`: minimize it, then check the
-   result into `fuzz/regressions/`, where `cargo test` runs it from then on.
+Fuzzing requires a nightly toolchain and `cargo-fuzz`, which the compiler itself does not:
 
-When a differential test fails, the message names a directory holding both binaries, both captures
-of their output, and the assembly `rustycc` produced — so the failure can be taken apart without
-reproducing it first.
+```bash
+rustup toolchain install nightly && cargo install cargo-fuzz
+./scripts/fuzz.sh lex        # also: parse, frontend
+```
 
-The documentation site builds too:
-
-1. `uv venv && uv pip install -r requirements-docs.txt`: install MkDocs.
-2. `uv run mkdocs serve`: serve locally with live reload.
-3. `uv run mkdocs build --strict`: build, failing on a broken link or a page missing from the `nav`.
+Environment overrides, snapshot triage, and crash minimization are documented in
+[`docs/CHEATSHEET.md`](docs/CHEATSHEET.md).
 
 ## Documentation
 
-[Architecture](docs/architecture.md) is the place to start — the passes, the grammar, the codegen
-strategy, and the testing architecture. Then [Implementation Plan](docs/PLAN.md),
-[Decisions](docs/decisions/index.md), the original [Proposal](docs/PROPOSAL.md), and
-[AGENTS.md](AGENTS.md) for how to work in the repo.
+[Architecture](docs/architecture.md) is the entry point: pipeline, grammar, code generation strategy,
+and testing architecture, each with a dive-deeper section for exact detail. Beyond it,
+[the phase explanations](docs/explanations/index.md) cover the implementation in order,
+[Decisions](docs/decisions/index.md) holds ten ADRs, [the plan](docs/PLAN.md) records scope per
+phase, [the proposal](docs/PROPOSAL.md) is the original statement of intent, and
+[AGENTS.md](AGENTS.md) documents repository conventions.
