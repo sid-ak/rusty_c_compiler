@@ -39,7 +39,7 @@ notice.
 Start with the environment if you intend to reproduce anything; otherwise the reports follow the
 order data moves through the compiler.
 
-- [00 — Development and Test Environment](00-environment.md): every version, and how to recreate
+- [00 — Development and Test Environment](00-environment/00-environment.md): every version, and how to recreate
   both environments from a clean machine.
 - [01 — Diagnostics](01-diagnostics/01-diagnostics.md): positions in a file, error messages, and the caret
   renderer every other pass reports through.
@@ -65,7 +65,7 @@ order data moves through the compiler.
   lives, and the instructions that move it.
 - [12 — The Driver and the Command Line](12-driver-and-cli/12-driver-and-cli.md): turning assembly text into a file
   that runs, and the flags that ask for each stage.
-- [13 — The Runtime Shim](13-runtime-shim.md): the three output functions every compiled program
+- [13 — The Runtime Shim](13-runtime-shim/13-runtime-shim.md): the three output functions every compiled program
   links against, and the one piece of C in this project that `rustycc` does not compile.
 - [14 — The Differential Harness](14-differential-harness.md): the test infrastructure itself —
   tested, because it is what everything else is measured against.

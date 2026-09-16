@@ -43,7 +43,7 @@ file — this document is the last thing written, so the tree it describes is th
 before it.
 
 Every version above was read from the tools themselves; the unedited capture is in
-[`unit_tests/evidence/environment.txt`](unit_tests/evidence/environment.txt).
+[`unit_tests/00-environment/evidence_environment.md`](unit_tests/00-environment/evidence_environment.md).
 
 ### The curated corpus
 
@@ -122,7 +122,7 @@ not quite comes from.
 | `cargo fmt --check` | clean |
 | `cargo clippy --all-targets -- -D warnings` | clean |
 
-The unedited capture is in [`unit_tests/evidence/cargo-test.txt`](unit_tests/evidence/cargo-test.txt),
+The unedited capture is in [`unit_tests/evidence_all.md`](unit_tests/evidence_all.md),
 and what each of those tests pins is in [the unit test reports](unit_tests/index.md).
 
 

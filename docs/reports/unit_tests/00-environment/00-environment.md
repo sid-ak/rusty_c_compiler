@@ -6,11 +6,11 @@ This document records exactly what software, with version numbers, the Rusty C C
 was developed and tested with, and gives step-by-step instructions for recreating both environments
 from a clean machine. It accompanies the unit test reports in this directory.
 
-The raw output every version below was read from is checked in beside it, in `evidence/`:
-`environment.txt` for the toolchain, and `cargo-test.txt` for the `cargo fmt`, `cargo clippy`, and
-`cargo test` run that each report's "Actual Outputs" section cites. `scripts/test-evidence.sh`
-regenerates both, so this record and the reports it supports can be re-verified against the code
-rather than trusted.
+The raw output every version below was read from is checked in beside this report, as
+[`evidence_environment.md`](evidence_environment.md). Every other unit test report has its own
+test run checked in the same way, beside that report, as `evidence_<module>.md`. A single run of
+`scripts/test-evidence.sh` regenerates all of it, so this record and every report it supports can
+be re-verified against the machine and the code rather than trusted.
 
 ## Hardware and operating system
 
@@ -21,7 +21,7 @@ rather than trusted.
 
 Apple Silicon is a hard requirement rather than an incidental detail. The compiler's target is ARM64
 macOS, chosen because it matches the development machine and avoids cross-compilation or emulation
-([ADR 0003](../../decisions/0003-single-target-arm64-macos.md)). The tests compile and directly
+([ADR 0003](../../../decisions/0003-single-target-arm64-macos.md)). The tests compile and directly
 execute ARM64 Mach-O binaries — the runtime shim's tests, the golden-program tests, and the whole
 differential suite — so there is no meaningful way to run this suite on another architecture.
 
@@ -32,7 +32,7 @@ differential suite — so there is no meaningful way to run this suite on anothe
 | Rust toolchain | 1.97.1 | Compiles `rustycc`. Pinned exactly, not as "stable", in `rust-toolchain.toml`, so a local build and a CI build always use the identical compiler and the identical lints. |
 | `rustup` | Installed, with the pinned toolchain | Installs the pin automatically: the first `cargo` command run inside the repository fetches 1.97.1 if it is not already present. |
 | Xcode Command Line Tools | Xcode 26.1.1 | Provides `clang`, which the build script uses to compile `runtime/shim.c`, which the driver shells out to for assembling and linking, and which the differential suite uses as its oracle. |
-| `clang` (Apple) | Apple clang 17.0.0, target `arm64-apple-darwin` | Three roles at once: it builds the runtime shim, it is the assembler and linker ([ADR 0009](../../decisions/0009-clang-as-assembler-and-linker.md)), and it is the testing oracle ([ADR 0001](../../decisions/0001-subset-of-c-with-clang-as-oracle.md)). |
+| `clang` (Apple) | Apple clang 17.0.0, target `arm64-apple-darwin` | Three roles at once: it builds the runtime shim, it is the assembler and linker ([ADR 0009](../../../decisions/0009-clang-as-assembler-and-linker.md)), and it is the testing oracle ([ADR 0001](../../../decisions/0001-subset-of-c-with-clang-as-oracle.md)). |
 | `git` | 2.50.1 | Version control. |
 | `clap` | 4.6.6 (locked; `Cargo.toml` asks for 4.5) | Command-line argument parsing, in `src/cli.rs`. The compiler's only direct dependency. |
 | `cargo fmt` and `cargo clippy` | Bundled with the pinned toolchain | Formatting and lint gates. Both are required clean in CI and were clean for this report. |
@@ -78,9 +78,11 @@ The test environment is the development environment. Nothing further is needed f
 2. `cargo test`: the whole suite. Roughly a minute on an M1, most of it spent in `clang`, since the
    program tiers compile and run every corpus program two and three times over.
 3. `cargo fmt --check && cargo clippy --all-targets -- -D warnings`: the lint gates, which CI also
-   runs and which this report's evidence includes.
-4. `scripts/test-evidence.sh`: regenerates `evidence/environment.txt` and `evidence/cargo-test.txt`
-   from a real run.
+   runs and which [`evidence_environment.md`](evidence_environment.md) includes — they are
+   crate-wide, not scoped to one unit, so they are captured here rather than in any single unit's
+   own evidence.
+4. `scripts/test-evidence.sh`: regenerates `evidence_environment.md`, along with every other
+   report's own `evidence_<module>.md`, from a real run.
 
 Two optional additions:
 
