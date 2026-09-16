@@ -24,8 +24,5 @@ fuzz_target!(|data: &[u8]| {
     // to bound as well: a loop in the parser can build a tree deeper than the parser ever recursed.
     let dump = ast::dump(&parsed.program, Spans::Shown);
 
-    assert!(
-        dump.starts_with("(program"),
-        "a dump that is not a program"
-    );
+    assert!(dump.starts_with("(program"), "a dump that is not a program");
 });
