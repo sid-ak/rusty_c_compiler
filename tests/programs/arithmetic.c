@@ -1,5 +1,6 @@
 // Integer arithmetic: every operator in the subset, the precedence rules that decide how they
 // group, and the four increment forms.
+// clang-warns: -Wlogical-op-parentheses
 // expect-exit: 0
 // expect-stdout: 22128532-175017911118952012331996567\n
 
