@@ -1,5 +1,7 @@
 // Functions: forward declarations, recursion, a `void` return, and parameter counts either side
 // of the eight-register boundary the ARM64 calling convention draws.
+// expect-exit: 0
+// expect-stdout: 042510364512055277\n
 
 void print_int(int n);
 void print_char(char c);

@@ -220,13 +220,14 @@ impl FrameLayout {
                 let arrived = self
                     .incoming()
                     .saturating_add(incoming_offset(slots, position));
-                emitter.load_from_frame("w8", width, arrived);
-                emitter.store_to_frame("w8", width, offset);
+                let scratch = argument_register(8, width);
+                emitter.load_from_frame(&scratch, width, arrived);
+                emitter.store_to_frame(&scratch, width, offset);
 
                 continue;
             }
 
-            emitter.store_to_frame(&format!("w{position}"), width, offset);
+            emitter.store_to_frame(&argument_register(position, width), width, offset);
         }
     }
 
@@ -502,15 +503,27 @@ pub fn incoming_offset(slots: &[FrameSlot], position: usize) -> u64 {
     cursor
 }
 
-/// The access width for a slot of `size` bytes.
+/// The access width for a parameter slot of `size` bytes.
 ///
-/// A `char` is the only thing narrower than a word; anything wider than a word is an array, which
-/// is addressed element by element rather than loaded whole.
+/// Three widths, not two. A `char` is one byte and an `int` is four, but a decayed array parameter
+/// is an eight-byte address, and spilling that as a word keeps its low half and throws the rest
+/// away — which is an address that points nowhere, found as a crash rather than a wrong number.
 fn width_for(size: u64) -> Width {
-    if size == 1 {
-        Width::Byte
-    } else {
-        Width::Word
+    match size {
+        1 => Width::Byte,
+        8 => Width::Double,
+        _ => Width::Word,
+    }
+}
+
+/// The register holding an incoming argument at `position`, named for the width it is stored at.
+///
+/// A `w` register is the low half of an `x` register, so storing eight bytes has to name the `x`
+/// form or only four of them are real.
+fn argument_register(position: usize, width: Width) -> String {
+    match width {
+        Width::Double => format!("x{position}"),
+        Width::Byte | Width::Word => format!("w{position}"),
     }
 }
 

@@ -244,12 +244,33 @@ impl Generator<'_> {
             .instruction(&format!("{} w0, [x{SECOND}]", width.store()));
     }
 
-    /// Reads the value at an lvalue into `w0`.
+    /// Reads the value of an lvalue into `w0`, or into `x0` where the value is an address.
+    ///
+    /// A pointer is the exception that has to be named: for a decayed array parameter, the address
+    /// [`address_of`](Generator::address_of) produces *is* the value, because the slot holds the
+    /// address rather than the data. Loading from it as well would read whatever the array's first
+    /// element happens to be and pass that on as if it were the array.
     fn read_lvalue(&mut self, expr: &Expr) {
         let width = self.width_of(expr.id);
+        let holds_an_address = matches!(
+            self.annotations.type_of(expr.id),
+            Some(Ty::Ptr(_) | Ty::Array(_, _))
+        );
+
         self.address_of(expr);
+
+        if holds_an_address {
+            return;
+        }
+
+        // A `w` register is the low half of an `x` register, so an eight-byte load has to name the
+        // `x` form or half the value is lost.
+        let register = match width {
+            Width::Double => "x0",
+            Width::Byte | Width::Word => "w0",
+        };
         self.emitter
-            .instruction(&format!("{} w0, [x0]", width.load()));
+            .instruction(&format!("{} {register}, [x0]", width.load()));
     }
 
     /// Computes an lvalue's address one nesting level deeper.

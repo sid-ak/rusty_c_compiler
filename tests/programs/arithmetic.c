@@ -1,5 +1,7 @@
 // Integer arithmetic: every operator in the subset, the precedence rules that decide how they
 // group, and the four increment forms.
+// expect-exit: 0
+// expect-stdout: 22128532-175017911118952012331996567\n
 
 void print_int(int n);
 void print_char(char c);
