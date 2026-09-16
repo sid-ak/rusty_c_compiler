@@ -22,7 +22,7 @@ The four commands CI runs, in the order that fails fastest.
 2. `cargo clippy --all-targets -- -D warnings`: includes the no-unwrap/expect/panic/indexing denials
    for `src/`. Test code is exempt via `clippy.toml`, but only inside `#[test]` bodies — a helper in
    a `tests/*.rs` file needs the file-level `#![allow(clippy::expect_used)]` those files carry.
-3. `cargo test`: 271 tests across nine binaries.
+3. `cargo test`: 361 tests across eleven binaries.
 4. `uv run mkdocs build --strict`: fails on a broken link or a page missing from `nav`. The red
    MkDocs 2.0 block is an advisory banner from mkdocs-material, not an error — read the last line.
 
@@ -30,8 +30,11 @@ The four commands CI runs, in the order that fails fastest.
 
 | Command | Scope | Tests |
 | --- | --- | --- |
-| `cargo test --lib` | in-crate units; no C compiled, no processes spawned | 224 |
-| `cargo test --test cli` | usage, exit codes, `--check` over both corpora | 6 |
+| `cargo test --lib` | in-crate units; no C compiled, no processes spawned | 254 |
+| `cargo test --test cli` | usage, exit codes, `--check`, and the driver's flags and temp files | 13 |
+| `cargo test --test codegen_exec` | every corpus program compiled, run, and checked against clang's answer | 9 |
+| `cargo test --test codegen_programs` | ~200 small C programs through the whole pipeline, plus per-construct snapshots | 42 |
+| `cargo test --test codegen_snapshots` | the emitter's output, and that an assembler accepts it | 7 |
 | `cargo test --test lexer_snapshots` | full token stream for a representative program | 1 |
 | `cargo test --test parser_snapshots` | AST for every corpus program, and the coverage matrix | 10 |
 | `cargo test --test parser_no_panic` | every corpus program cut short at every byte, plus `tests/adversarial/` | 8 |
@@ -490,6 +493,92 @@ To see every rejection rule and what clang makes of each:
 cat tests/programs/invalid/COVERAGE.md
 ```
 
+### 16. Compile and run a program
+
+```bash
+cat > /tmp/demo.c <<'EOF'
+void print_int(int n);
+void print_string(char s[]);
+
+int square(int n) { return n * n; }
+
+int main(void) {
+    print_string("squares: ");
+    for (int i = 1; i <= 5; i = i + 1) {
+        print_int(square(i));
+        print_string(" ");
+    }
+    return 0;
+}
+EOF
+./target/debug/rustycc /tmp/demo.c -o /tmp/demo
+/tmp/demo
+```
+
+```
+squares: 1 4 9 16 25
+```
+
+There is no preprocessor, so the program declares the three shim functions itself rather than
+including a header. The driver links the shim in without being asked.
+
+### 17. Read the assembly
+
+```bash
+./target/debug/rustycc /tmp/demo.c -S -o /tmp/demo.s
+sed -n '/_square:/,/ret/p' /tmp/demo.s
+```
+
+```
+_square:
+	stp x29, x30, [sp, #-48]!
+	mov x29, sp
+	str w0, [x29, #16]
+	add x0, x29, #16
+	ldr w0, [x0]
+	str w0, [x29, #24]
+	add x0, x29, #16
+	ldr w0, [x0]
+	mov w1, w0
+	ldr w0, [x29, #24]
+	mul w0, w0, w1
+	b Lsquare_return_0
+```
+
+The six-step shape of a binary operation is the thing to read here, and `n * n` shows it even though
+both operands are the same:
+
+1. `str w0, [x29, #16]` is the prologue spilling the parameter into its slot.
+2. The left operand is loaded, then spilled to the multiplication's own temporary at `#24`.
+3. The right operand is loaded and moved to `w1`.
+4. The left operand comes back into `w0`.
+5. `mul w0, w0, w1` reads left then right, in source order.
+
+Every offset is positive because `x29` sits at the bottom of the frame, and the `b` at the end goes
+to the function's single epilogue rather than returning from where it stands.
+
+### 18. Compare against clang, by hand
+
+```bash
+SHIM=$(find target/debug/build -name shim.o | head -1)
+clang -O0 -std=c99 tests/programs/sorting.c "$SHIM" -o /tmp/oracle
+./target/debug/rustycc tests/programs/sorting.c -o /tmp/ours
+diff <(/tmp/oracle) <(/tmp/ours) && echo "identical"
+```
+
+`identical`. This is Phase 5's differential test done once by hand; `cargo test --test codegen_exec`
+does the recorded-expectation version of it for every program in the corpus.
+
+### 19. Keep the intermediates
+
+```bash
+./target/debug/rustycc /tmp/demo.c -o /tmp/demo --keep-temps
+```
+
+Prints the directory it kept, which holds the `.s` and the `.o`. Without the flag that directory is
+removed however the run ends, including when the link fails — which is exactly when looking at the
+assembly is worth doing.
+
 ## The runtime shim by hand
 
 ```bash
@@ -577,9 +666,10 @@ found once can never come back unnoticed.
 | `--dump-ast` | the parser | prints the syntax tree |
 | `--check` | semantic analysis | runs the whole front end; prints nothing when accepted |
 | `--dump-annotations` | semantic analysis | prints the types, conversions, bindings, frames, and interned literals |
-| `-S` | code generation | accepted, writes nothing — backend is phase 4 |
-| `-o <FILE>` | — | parsed and carried; nothing links yet |
-| `--keep-temps` | — | parsed; the driver that makes temp files is phase 4 |
+| `-S` | code generation | writes the ARM64 assembly |
+| `-c` | assembling | writes an object file |
+| `--emit-asm-to <FILE>` | — | also writes the assembly, whatever else is produced |
+| `-o <FILE>` | — | where the output goes; defaults to the input's stem |
+| `--keep-temps` | — | leaves the intermediates and prints where they are |
 
-`rustycc program.c -o program` parses its arguments and exits 0 without producing an executable. The
-shape of the CLI is fixed; later phases fill it in.
+`rustycc program.c -o program && ./program` works.
