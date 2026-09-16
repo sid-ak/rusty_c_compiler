@@ -131,6 +131,47 @@ fn a_timeout_is_not_an_exit_code() {
     assert!(mismatch.subject.contains("timed out"), "{mismatch}");
 }
 
+/// Two runs that both timed out are reported as the timeout, not as their truncated output.
+///
+/// A killed program's stdout is however much of it escaped before the signal arrived, so two
+/// programs that both ran forever almost always differ there too. Reporting that difference sends
+/// whoever reads the failure looking for a wrong answer in a program that never produced one.
+#[test]
+fn two_timeouts_are_reported_as_the_timeout() {
+    let mut oracle = clean("partial output from clang");
+    oracle.exit = Exit::TimedOut;
+    let mut subject = clean("a different amount of partial output");
+    subject.exit = Exit::TimedOut;
+
+    let mismatch =
+        harness::compare(&oracle, &subject).expect_err("neither program finished, which is not ok");
+
+    assert_eq!(mismatch.axis, "the exit status");
+    assert!(
+        mismatch.subject.contains("neither program finished"),
+        "{mismatch}"
+    );
+}
+
+/// A report does not carry megabytes of output.
+///
+/// A generated program can print more than anyone will scroll through. The whole of it is on disk
+/// in the directory the report names; what the message carries is the beginning and how much more
+/// there was.
+#[test]
+fn a_long_output_is_cut_short_in_the_report() {
+    let long = "x".repeat(100_000);
+    let mismatch =
+        harness::compare(&clean(&long), &clean("short")).expect_err("these do not compare equal");
+
+    assert!(
+        mismatch.oracle.len() < 1_000,
+        "the report carried {} bytes",
+        mismatch.oracle.len()
+    );
+    assert!(mismatch.oracle.contains("more bytes"), "{mismatch}");
+}
+
 // -- The whole harness notices a wrong compiler, end to end --------------------------------------
 
 /// A deliberately wrong program on the `rustycc` side is reported as a mismatch.

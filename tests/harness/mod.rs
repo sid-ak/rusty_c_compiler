@@ -300,7 +300,28 @@ impl fmt::Display for Mismatch {
 ///
 /// The axes are checked in the order a person would want them reported: what the program printed
 /// first, since that is what usually says which operation went wrong, and the status last.
+///
+/// A run that timed out is the exception, and is reported before anything else. A killed program's
+/// output is however much of it got out before the signal arrived, so two programs that both ran
+/// forever almost always differ on stdout as well — and "stdout differs" sends whoever reads it
+/// looking for a wrong answer in a program that never produced one.
 pub fn compare(oracle: &Execution, subject: &Execution) -> Result<(), Mismatch> {
+    if oracle.exit == Exit::TimedOut || subject.exit == Exit::TimedOut {
+        if oracle.exit != subject.exit {
+            return Err(Mismatch {
+                axis: "the exit status",
+                oracle: oracle.exit.to_string(),
+                subject: subject.exit.to_string(),
+            });
+        }
+
+        return Err(Mismatch {
+            axis: "the exit status",
+            oracle: oracle.exit.to_string(),
+            subject: format!("{} as well; neither program finished", subject.exit),
+        });
+    }
+
     if oracle.stdout != subject.stdout {
         return Err(Mismatch {
             axis: "stdout",
@@ -328,9 +349,21 @@ pub fn compare(oracle: &Execution, subject: &Execution) -> Result<(), Mismatch> 
     Ok(())
 }
 
+/// How much of a program's output a failure message carries before it stops being readable.
+const RENDERED_LIMIT: usize = 400;
+
 /// Renders output bytes so escapes and trailing whitespace are visible in a failure message.
+///
+/// Long output is cut short. A generated program can print megabytes, and a report carrying two of
+/// them is one nobody scrolls to the end of — the whole of both is on disk in the directory the
+/// report names, which is where that much output belongs.
 fn render(bytes: &[u8]) -> String {
-    format!("{:?}", String::from_utf8_lossy(bytes))
+    let text = String::from_utf8_lossy(bytes);
+    let Some((head, _)) = text.split_at_checked(RENDERED_LIMIT) else {
+        return format!("{text:?}");
+    };
+
+    format!("{head:?} … and {} more bytes", bytes.len() - head.len())
 }
 
 /// What comparing one program under both compilers concluded.
