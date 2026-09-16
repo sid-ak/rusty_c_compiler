@@ -205,15 +205,20 @@ impl Generator<'_> {
             Initializer::List { elements, .. } => {
                 let width = self.element_width(decl.id);
                 let stride = element_stride(width);
+                let mut written = 0u64;
 
-                for (index, element) in elements.iter().enumerate() {
+                for element in elements {
                     self.expr(element);
-
-                    let Ok(index) = u64::try_from(index) else {
-                        continue;
-                    };
                     self.emitter
-                        .store_to_frame("w0", width, base.saturating_add(index * stride));
+                        .store_to_frame("w0", width, base.saturating_add(written * stride));
+                    written = written.saturating_add(1);
+                }
+
+                // The elements the list did not reach are zero. A global gets that from its section
+                // being zero to begin with; a local's storage is whatever the stack was last using
+                // it for, so the zeros are written here or they are not there at all.
+                if let Ty::Array(_, count) = &declared {
+                    self.zero_elements(base, written, u64::from(*count), width, stride);
                 }
             }
         }
@@ -249,11 +254,27 @@ impl Generator<'_> {
         }
 
         // Anything the literal did not reach is zero, the same as a short brace list.
+        self.zero_elements(base, written, u64::from(*count), width, stride);
+    }
+
+    /// Writes zero into the elements of the array at `base` from `written` up to `count`.
+    ///
+    /// Shared by the two initializer forms that can stop short of the end — a brace list with
+    /// fewer values than the array holds, and a string literal shorter than the `char` array it
+    /// fills — so the two cannot disagree about what an unmentioned element holds.
+    ///
+    /// The zero register is loaded once and reused, which is why this is a loop here rather than a
+    /// loop in the emitted code: the arrays this subset can declare are small enough that the
+    /// unrolled stores are cheaper than a counter and a branch.
+    fn zero_elements(&mut self, base: u64, written: u64, count: u64, width: Width, stride: u64) {
+        if written >= count {
+            return;
+        }
+
         self.emitter.instruction("movz w0, #0");
-        while written < u64::from(*count) {
+        for index in written..count {
             self.emitter
-                .store_to_frame("w0", width, base.saturating_add(written * stride));
-            written = written.saturating_add(1);
+                .store_to_frame("w0", width, base.saturating_add(index * stride));
         }
     }
 }
