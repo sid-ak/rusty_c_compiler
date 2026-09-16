@@ -96,6 +96,33 @@ struct Analyzer {
     frame: Frame,
 }
 
+/// Where a value is being carried into a location of another type.
+///
+/// The rule is the same in all three places — `Ty::assignability` decides it — so only the wording
+/// differs, and it differs here rather than at three call sites that could drift apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Carrying {
+    /// `target = value`.
+    Assignment,
+    /// `return value;`.
+    Return,
+    /// `int x = value;`, and each element of a brace list.
+    Initializer,
+}
+
+impl Carrying {
+    /// How to say that `actual` cannot be carried into `expected` here.
+    fn cannot(self, actual: &Ty, expected: &Ty) -> String {
+        match self {
+            Carrying::Assignment => format!("cannot assign '{actual}' to '{expected}'"),
+            Carrying::Return => {
+                format!("cannot return '{actual}' from a function returning '{expected}'")
+            }
+            Carrying::Initializer => format!("cannot initialize '{expected}' with '{actual}'"),
+        }
+    }
+}
+
 /// What an expression is being evaluated for, which decides what its type is allowed to be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Use {
@@ -390,13 +417,14 @@ impl Analyzer {
             StmtKind::Return(Some(expr)) => {
                 let ty = self.expr(expr);
                 let returns = self.return_type.clone();
-                self.record_conversion_to(expr, &ty, &returns);
 
-                if self.return_type == Ty::Void {
+                if returns == Ty::Void {
                     self.report(
                         stmt.span,
                         "'return' with a value in a function returning 'void'",
                     );
+                } else {
+                    self.carry_into(expr, &ty, &returns, Carrying::Return);
                 }
             }
             StmtKind::Return(None) => {
@@ -420,14 +448,21 @@ impl Analyzer {
         self.leave();
     }
 
-    /// Records the conversion that carries `expr`'s value into a location of type `expected`.
+    /// Carries `expr`'s value into a location of type `expected`, reporting it if it cannot go.
     ///
     /// The one place an implicit conversion is decided, so a promotion at an argument, a
     /// truncation at an assignment, and a decay at a call are all written down by the same rule
-    /// rather than by three that could drift apart.
-    fn record_conversion_to(&mut self, expr: &Expr, actual: &Ty, expected: &Ty) {
-        if let Assignability::Converted(conversion) = Ty::assignability(expected, actual) {
-            self.annotations.record_conversion(expr.id, conversion);
+    /// rather than by three that could drift apart — and so is the case where no conversion makes
+    /// the types meet, which is an error rather than something to pass over in silence.
+    fn carry_into(&mut self, expr: &Expr, actual: &Ty, expected: &Ty, carrying: Carrying) {
+        match Ty::assignability(expected, actual) {
+            Assignability::Exact => {}
+            Assignability::Converted(conversion) => {
+                self.annotations.record_conversion(expr.id, conversion);
+            }
+            Assignability::Incompatible => {
+                self.report(expr.span, carrying.cannot(actual, expected));
+            }
         }
     }
 
@@ -480,21 +515,36 @@ impl Analyzer {
     /// overrun, and a scalar's initializer is checked by the ordinary assignment rules.
     fn type_initializer(&mut self, init: &Initializer, declared: &Ty) {
         let written = match init {
-            Initializer::Expr(expr) => {
+            // A string literal filling a `char` array is the one initializer that is not an
+            // assignment: an array is never an assignment target, so asking whether the types are
+            // compatible would reject the shape C exists to allow. Only its length is checked.
+            Initializer::Expr(expr) if fills_an_array(expr, declared) => {
                 let ty = self.expr(expr);
-                self.record_conversion_to(expr, &ty, declared);
 
-                // A string literal initializing an array fills it, terminator included.
                 match ty {
-                    Ty::Array(_, length) if matches!(expr.kind, ExprKind::StrLit(_)) => {
-                        Some((length, expr.span))
-                    }
+                    Ty::Array(_, length) => Some((length, expr.span)),
                     _ => None,
                 }
             }
+            Initializer::Expr(expr) => {
+                let ty = self.expr(expr);
+                self.carry_into(expr, &ty, declared, Carrying::Initializer);
+
+                None
+            }
             Initializer::List { elements, span } => {
+                // A brace list fills an array one element at a time, so each element is carried
+                // into the element type rather than into the array.
+                let element_type = match declared {
+                    Ty::Array(element, _) => Some(element.as_ref().clone()),
+                    _ => None,
+                };
+
                 for element in elements {
-                    self.expr(element);
+                    let ty = self.expr(element);
+                    if let Some(expected) = &element_type {
+                        self.carry_into(element, &ty, expected, Carrying::Initializer);
+                    }
                 }
 
                 let count = u32::try_from(elements.len()).unwrap_or(u32::MAX);
@@ -593,10 +643,11 @@ impl Analyzer {
             ExprKind::Assign { target, value } => {
                 let target_ty = self.expr(target);
                 let value_ty = self.expr(value);
-                self.record_conversion_to(value, &value_ty, &target_ty);
 
                 if target_ty.decays() {
                     self.report(target.span, "array name is not assignable");
+                } else {
+                    self.carry_into(value, &value_ty, &target_ty, Carrying::Assignment);
                 }
 
                 target_ty
@@ -731,14 +782,11 @@ impl Analyzer {
     fn check_arguments(&mut self, callee: &Expr, params: &[Ty], arg_types: &[Ty], args: &[Expr]) {
         for (position, ((param, actual), arg)) in params.iter().zip(arg_types).zip(args).enumerate()
         {
-            match Ty::assignability(param, actual) {
-                Assignability::Incompatible => {}
-                Assignability::Exact => continue,
-                Assignability::Converted(conversion) => {
-                    self.annotations.record_conversion(arg.id, conversion);
+            if Ty::assignability(param, actual) != Assignability::Incompatible {
+                // The conversion an argument needs is the same question, answered the same way.
+                self.carry_into(arg, actual, param, Carrying::Assignment);
 
-                    continue;
-                }
+                continue;
             }
 
             let name = called_name(callee);
@@ -950,6 +998,12 @@ impl Analyzer {
     fn leave(&mut self) {
         self.depth = self.depth.saturating_sub(1);
     }
+}
+
+/// Whether `init` is a string literal filling an array, which is an initializer and not an
+/// assignment.
+fn fills_an_array(init: &Expr, declared: &Ty) -> bool {
+    matches!(init.kind, ExprKind::StrLit(_)) && matches!(declared, Ty::Array(_, _))
 }
 
 /// The name in `f(...)`, quoted, or a description when the callee is not a plain name.

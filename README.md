@@ -37,9 +37,9 @@ In the repo:
   input into a diagnostic rather than a stack overflow.
 - `src/sema/` — the type model and its promotion, decay, and compatibility rules; a scope stack
   resolving every identifier; a two-pass walk that registers the top level before it walks any body,
-  so a call to a function defined later in the file resolves; twenty-seven checks, each with its own
+  so a call to a function defined later in the file resolves; thirty-one checks, each with its own
   message and span; and the annotation tables code generation will read.
-- `tests/programs/` — five subset-C programs, one per feature area, and twenty-seven in `invalid/`
+- `tests/programs/` — five subset-C programs, one per feature area, and thirty-one in `invalid/`
   that must stay rejected, each with a coverage matrix CI holds them to. The valid ones are the
   parser's and analyzer's snapshots now and the differential corpus later.
 - `runtime/shim.c` — `print_int`, `print_char`, and `print_string` on `write(2)`, compiled once by

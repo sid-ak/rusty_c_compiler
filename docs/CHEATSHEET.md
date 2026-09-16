@@ -22,7 +22,7 @@ The four commands CI runs, in the order that fails fastest.
 2. `cargo clippy --all-targets -- -D warnings`: includes the no-unwrap/expect/panic/indexing denials
    for `src/`. Test code is exempt via `clippy.toml`, but only inside `#[test]` bodies — a helper in
    a `tests/*.rs` file needs the file-level `#![allow(clippy::expect_used)]` those files carry.
-3. `cargo test`: 267 tests across nine binaries.
+3. `cargo test`: 271 tests across nine binaries.
 4. `uv run mkdocs build --strict`: fails on a broken link or a page missing from `nav`. The red
    MkDocs 2.0 block is an advisory banner from mkdocs-material, not an error — read the last line.
 
@@ -30,7 +30,7 @@ The four commands CI runs, in the order that fails fastest.
 
 | Command | Scope | Tests |
 | --- | --- | --- |
-| `cargo test --lib` | in-crate units; no C compiled, no processes spawned | 220 |
+| `cargo test --lib` | in-crate units; no C compiled, no processes spawned | 224 |
 | `cargo test --test cli` | usage, exit codes, `--check` over both corpora | 6 |
 | `cargo test --test lexer_snapshots` | full token stream for a representative program | 1 |
 | `cargo test --test parser_snapshots` | AST for every corpus program, and the coverage matrix | 10 |

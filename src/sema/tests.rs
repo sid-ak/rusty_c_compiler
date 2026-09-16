@@ -655,6 +655,34 @@ const RULES: &[Rule] = &[
         points_at: "a",
     },
     Rule {
+        name: "assigning a value of an incompatible type",
+        legal: "int main(void) { int x; int a[2]; a[0] = 1; x = a[0]; return x; }",
+        illegal: "int main(void) { int x; int a[2]; x = a; return x; }",
+        message: "cannot assign 'int[2]' to 'int'",
+        points_at: "a",
+    },
+    Rule {
+        name: "returning a value of an incompatible type",
+        legal: "int first(void) { int a[2]; a[0] = 1; return a[0]; }",
+        illegal: "int first(void) { int a[2]; return a; }",
+        message: "cannot return 'int[2]' from a function returning 'int'",
+        points_at: "a",
+    },
+    Rule {
+        name: "initializing a variable with an incompatible type",
+        legal: "int main(void) { int a[2]; a[0] = 1; int x = a[0]; return x; }",
+        illegal: "int main(void) { int a[2]; int x = a; return x; }",
+        message: "cannot initialize 'int' with 'int[2]'",
+        points_at: "a",
+    },
+    Rule {
+        name: "an array initializer element of an incompatible type",
+        legal: "int main(void) { int a[2] = {1, 2}; return a[0]; }",
+        illegal: "int main(void) { int b[2]; int a[2] = {1, b}; return a[0]; }",
+        message: "cannot initialize 'int' with 'int[2]'",
+        points_at: "b",
+    },
+    Rule {
         name: "assigning to an array name",
         legal: "int main(void) { int a[2]; a[0] = 1; return a[0]; }",
         illegal: "int main(void) { int a[2]; int b[2]; a = b; return 0; }",
@@ -1116,4 +1144,44 @@ fn the_annotation_dump_is_the_same_on_every_run() {
 
     assert_eq!(first, second);
     assert!(!first.is_empty(), "the dump has content to compare");
+}
+
+/// A `char` array initialized from a string literal stays legal, terminator included.
+///
+/// The types are not assignable to one another — an array is never an assignment target — so the
+/// compatibility check that guards assignments has to leave this shape alone. Only the length is
+/// its business.
+#[test]
+fn a_char_array_may_be_initialized_from_a_string_literal() {
+    assert_eq!(
+        messages("int main(void) { char greeting[6] = \"hello\"; return greeting[0]; }"),
+        Vec::<String>::new()
+    );
+}
+
+/// A string literal too long for the array it fills is still reported, and only once.
+#[test]
+fn a_string_literal_longer_than_its_array_is_reported_once() {
+    assert_eq!(
+        messages("int main(void) { char greeting[3] = \"hello\"; return greeting[0]; }"),
+        vec!["6 initializers for an array of 3".to_owned()]
+    );
+}
+
+/// Assigning an array reports that it is not assignable, and does not also report the types.
+#[test]
+fn assigning_to_an_array_reports_one_problem_not_two() {
+    assert_eq!(
+        messages("int main(void) { int a[2]; int b[2]; a = b; return 0; }"),
+        vec!["array name is not assignable".to_owned()]
+    );
+}
+
+/// A bare `return` in a `void` function is the `void` rule alone, not a compatibility failure too.
+#[test]
+fn a_void_function_returning_a_value_reports_one_problem_not_two() {
+    assert_eq!(
+        messages("void nothing(void) { return 1; }"),
+        vec!["'return' with a value in a function returning 'void'".to_owned()]
+    );
 }

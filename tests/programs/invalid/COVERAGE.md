@@ -21,6 +21,7 @@ fails if those two lists disagree, and another fails if a file here has no row b
 | [`array_as_condition.c`](array_as_condition.c) | an array used as a condition | `value of type 'int[2]' is not a condition` | **no** — deviation |
 | [`array_in_arithmetic.c`](array_in_arithmetic.c) | an array used in arithmetic | `invalid operands to binary '+': 'int[2]' and 'int'` | yes |
 | [`array_of_void.c`](array_of_void.c) | an array of void | `array has incomplete element type 'void'` | yes |
+| [`assign_incompatible_type.c`](assign_incompatible_type.c) | assigning a value of an incompatible type | `cannot assign 'int[2]' to 'int'` | yes |
 | [`assign_to_array.c`](assign_to_array.c) | assigning to an array name | `array name is not assignable` | yes |
 | [`bare_return_in_non_void.c`](bare_return_in_non_void.c) | bare return in a non-void function | `'return' with no value in a function returning 'int'` | yes |
 | [`break_outside_loop.c`](break_outside_loop.c) | break outside a loop | `'break' outside of a loop` | yes |
@@ -33,11 +34,14 @@ fails if those two lists disagree, and another fails if a file here has no row b
 | [`falls_off_the_end.c`](falls_off_the_end.c) | control reaching the end of a non-void function | `control reaches the end of non-void function 'one'` | **no** — deviation |
 | [`function_as_value.c`](function_as_value.c) | using a function name as a value | `'helper' is a function; it can only be called` | yes |
 | [`index_non_array.c`](index_non_array.c) | indexing a non-array and non-pointer | `subscripted value is not an array or a pointer` | yes |
+| [`initialize_incompatible_type.c`](initialize_incompatible_type.c) | initializing a variable with an incompatible type | `cannot initialize 'int' with 'int[2]'` | yes |
+| [`initializer_element_incompatible_type.c`](initializer_element_incompatible_type.c) | an array initializer element of an incompatible type | `cannot initialize 'int' with 'int[2]'` | yes |
 | [`initializer_too_long.c`](initializer_too_long.c) | an array initializer longer than the array | `3 initializers for an array of 2` | **no** — deviation |
 | [`non_constant_global.c`](non_constant_global.c) | a non-constant global initializer | `global initializer is not a constant` | yes |
 | [`non_integer_subscript.c`](non_integer_subscript.c) | non-integer subscript | `array subscript is not an integer` | yes |
 | [`redeclaration_in_scope.c`](redeclaration_in_scope.c) | redeclaration in the same scope | `redeclaration of 'x' in this scope` | yes |
 | [`redefinition.c`](redefinition.c) | multiple definitions of one function | `redefinition of 'helper'` | yes |
+| [`return_incompatible_type.c`](return_incompatible_type.c) | returning a value of an incompatible type | `cannot return 'int[2]' from a function returning 'int'` | yes |
 | [`return_value_in_void.c`](return_value_in_void.c) | return with a value in a void function | `'return' with a value in a function returning 'void'` | yes |
 | [`undeclared_function.c`](undeclared_function.c) | undeclared function | `undeclared identifier 'helper'` | yes |
 | [`undeclared_identifier.c`](undeclared_identifier.c) | undeclared identifier | `undeclared identifier 'x'` | yes |

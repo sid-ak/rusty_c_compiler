@@ -47,7 +47,7 @@ backend will need to know about it.
 - A scope stack resolves every identifier to the declaration it refers to.
     - Names nest: the innermost declaration wins, and when its block ends the one it was hiding
       becomes visible again.
-- A two-pass walk checks the program against twenty-seven rules.
+- A two-pass walk checks the program against thirty-one rules.
     - The first pass registers the top level, so a call to a function defined later in the file
       resolves — ordinary C, and impossible in one pass without a forward-reference hack.
     - Each rule has its own message and points at the text that broke it.
@@ -455,7 +455,7 @@ through the same code rather than two copies of it.
 
 #### Programs That Must Stay Rejected (`tests/programs/invalid/`)
 
-Twenty-seven programs, one per rejection rule, each carrying a header saying which rule it breaks,
+Thirty-one programs, one per rejection rule, each carrying a header saying which rule it breaks,
 what the message should be, and what `clang` makes of it:
 
 ```c
