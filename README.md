@@ -1,8 +1,8 @@
 # Rusty C Compiler
 
-A C compiler in Rust that produces real ARM64 executables for Apple Silicon. No interpreter, no
-virtual machine, no transpiling to something else — the output is the same kind of file `clang`
-would hand you.
+An ahead-of-time compiler for a defined subset of C, implemented in Rust, targeting ARM64 macOS on
+Apple Silicon. It lowers source to AArch64 assembly and drives the system toolchain to assemble and
+link a native Mach-O executable.
 
 ```c
 void print_int(int n);
@@ -28,45 +28,46 @@ $ rustycc fib.c -o fib && ./fib
 0 1 1 2 3 5 8 13 21 34
 ```
 
-## The Oracle
+## Correctness model
 
-Every compiler project hits the same wall: how do you know the output is right? Writing the expected
-answer by hand means being a compiler, which is the thing you were trying to build.
+The accepted language is a subset of C rather than an invented one, so `clang` can compile the same
+translation unit. Correctness is therefore established by differential testing: each corpus program
+is built by both compilers, both binaries are executed under a wall-clock timeout, and stdout,
+stderr, and exit status are compared byte for byte. `clang` supplies the expected result, so no
+expected output is authored by hand.
 
-So this project doesn't. It compiles a subset of real C, which means `clang` can compile the exact
-same file. Build both, run both, compare what they printed and how they exited. Agreement is
-evidence that nobody had an opinion about; disagreement names a bug with a program attached to it.
+This makes the oracle's domain the binding constraint. Where C leaves behavior undefined, neither
+implementation is obliged to do anything in particular, so agreement and disagreement are both
+uninformative. The subset therefore excludes statically detectable undefined behavior, and the
+corpus is constrained to defined programs by review and, for generated programs, by construction.
 
-That one decision shapes everything else. The language is a subset of C rather than something
-invented, because an invented language has no second implementation to check against. Programs that
-C leaves undefined are rejected rather than compiled, because two compilers doing different things
-with undefined behaviour proves nothing — and two doing the same thing proves nothing either.
+Three tiers run against that model: a curated corpus of sixty-four programs, a seeded generator that
+emits random well-typed programs, and three coverage-guided fuzz targets over the front end.
 
-Sixty-four programs go through that comparison on every run. A seeded generator writes more of them
-in shapes nobody would choose, and three fuzz targets throw bytes that aren't programs at all.
+## Target restriction
 
-## Why macOS only, and Apple Silicon only
+Code generation targets ARM64 macOS exclusively. The backend emits AArch64 instructions, implements
+Apple's AAPCS64 variant, and writes Mach-O sections and symbol names directly, with no target
+abstraction and no target-independent intermediate representation. Retargeting would invalidate
+substantially all of `src/codegen/`: instruction selection, register conventions, object format, and
+the stack-argument layout Apple packs differently from generic AAPCS64.
 
-This is deliberate, not unfinished.
+The restriction buys two properties:
 
-The compiler emits ARM64 instructions, follows Apple's AAPCS64 calling convention, and writes Mach-O
-sections with Mach-O symbol naming — and does all of that directly, with no target abstraction and
-no intermediate representation in between. Change the machine and essentially all of `src/codegen/`
-becomes wrong: different instructions, different registers, a different object format, a different
-rule for where the ninth argument to a function goes.
+- A backend that reads end to end. Target-specific facts — Mach-O's leading underscore, 16-byte
+  stack alignment at call sites, `__TEXT,__cstring` — appear where they are used rather than behind
+  an abstraction intended to make them interchangeable.
+- In-process native testing. The suite compiles and executes programs as part of `cargo test`, with
+  no emulator, cross-linker, or remote runner, and with `clang` on the same machine acting as oracle
+  for the same architecture.
 
-The upside is a backend you can read end to end. Target-specific facts sit in plain view where they
-are used — the leading underscore on every Mach-O symbol, the 16-byte stack alignment at every call,
-`__TEXT,__cstring` — instead of hiding behind an interface designed to make them interchangeable.
+The trade-off is recorded in [ADR 0003](docs/decisions/0003-single-target-arm64-macos.md).
 
-It also keeps the testing honest. The suite compiles a program and runs it, natively, as part of
-`cargo test`. No emulator, no cross-linker, no remote runner, and `clang` on the same machine is
-answering about the same architecture. A portability layer would have bought a second target nobody
-was going to build, at the cost of the two things that make this project work.
+## Diagnostics
 
-The reasoning in full is [ADR 0003](docs/decisions/0003-single-target-arm64-macos.md).
-
-## When your program is wrong
+Diagnostics are accumulated rather than fatal: a translation unit is analyzed to completion and every
+defect is reported in source order. Each carries a span rendered as a caret under the offending
+text, and collisions carry a secondary span pointing at the earlier declaration.
 
 ```console
 $ rustycc --check oops.c
@@ -82,138 +83,118 @@ oops.c:4:12: error: undeclared identifier 'missing'
 rustycc: 2 errors generated
 ```
 
-Every mistake in the file, in source order, not just the first. A caret under the exact text, and a
-second caret pointing at the other declaration when two names collide. Real C that this subset
-leaves out — `struct`, `switch`, `?:` — says so by name rather than failing as a mystery syntax
-error.
+Constructs that are valid C but outside the subset — `struct`, `switch`, `?:` — are reported by name
+rather than as a generic syntax error.
 
-## Quick start
+## Requirements
 
-You will need an Apple Silicon Mac, Rust stable, and the Xcode Command Line Tools
-(`xcode-select --install`). The Rust toolchain is pinned, so `cargo` sorts itself out.
-
-```bash
-cargo build                       # builds rustycc, and the runtime shim with clang
-cargo test                        # every tier, about a minute on an M1
-./target/debug/rustycc program.c -o program
-```
-
-`cargo build` leaves the compiler at `target/debug/rustycc`. The examples on this page write plain
-`rustycc`, so to copy them straight out, put it on your path:
+Apple Silicon hardware, Rust stable, and the Xcode Command Line Tools
+(`xcode-select --install`), which supply the `clang` used for assembly, linking, and differential
+comparison. The Rust toolchain is pinned in `rust-toolchain.toml`.
 
 ```bash
-cargo install --path .
+cargo build                  # compiler, plus runtime/shim.c via the build script
+cargo test                   # all tiers; approximately one minute on an M1
+cargo install --path .       # optional: place rustycc on PATH
 ```
 
-One wrinkle worth knowing: the runtime shim is compiled by the build script and the installed
-compiler links against it where it was built, inside `target/`. So `cargo clean` will break the
-installed binary until you run `cargo install --path .` again. It says so plainly when it happens —
-the driver reports the linker's own words — but it is a surprising thing to meet without warning.
+`cargo install --path .` links the installed binary against the shim object under `target/`, so
+`cargo clean` invalidates it until the install is repeated.
 
-There is no preprocessor, so there is no header to include. A program that wants to print declares
-the three runtime functions itself — `print_int`, `print_char`, `print_string` — and the driver
-links them in.
+The subset has no preprocessor. A translation unit declares the runtime functions it uses —
+`print_int`, `print_char`, `print_string` — and the driver links the shim automatically.
 
-To watch the compiler think, each stage will show its work:
+## Usage
 
-| Flag | What it prints |
+| Flag | Effect |
 |---|---|
-| `--dump-tokens` | every token, with the source range it came from |
-| `--dump-ast` | the syntax tree |
-| `--dump-annotations` | types, bindings, conversions, frame layouts, interned strings |
-| `--check` | nothing, if the program is good; diagnostics and a non-zero exit if not |
-| `-S` | the ARM64 assembly |
+| `--dump-tokens` | token stream with source spans |
+| `--dump-ast` | syntax tree |
+| `--dump-annotations` | resolved types, bindings, conversions, frame layouts, interned literals |
+| `--check` | front end only; exit status reports acceptance |
+| `-S` | AArch64 assembly |
+| `-c` | object file |
+| `-o <file>` | output path |
 
-[`docs/CHEATSHEET.md`](docs/CHEATSHEET.md) has worked examples of all of them, with real output.
+Worked examples with real output are in [`docs/CHEATSHEET.md`](docs/CHEATSHEET.md).
 
-## What's in the language
+## Language subset
 
-In:
+Supported: `int`, `char`, and `void`; functions with recursion and forward declarations;
+single-dimension arrays, which decay to a pointer only at a parameter boundary; `if`/`else`,
+`while`, `for`, `break`, `continue`, and `return`; full C operator precedence with branch-based
+short-circuit evaluation; and string literals.
 
-- `int`, `char`, `void`
-- functions, including recursion and forward declarations
-- single-dimension arrays, which become pointers at a call boundary and nowhere else
-- `if`/`else`, `while`, `for`, `break`, `continue`, `return`
-- full C precedence, with short-circuiting that genuinely short-circuits
-- string literals
+Excluded, each reported by name: the preprocessor, `struct`, `switch`, `do`/`while`, the conditional
+operator, compound assignment, bitwise operators, floating point, multi-dimensional arrays, pointer
+variables, `&`, `*`, variadic functions, and `sizeof`. Statically detectable undefined behavior is
+also rejected ([ADR 0008](docs/decisions/0008-reject-undefined-behavior.md)).
 
-Out, each with a diagnostic that names it rather than a generic parse error:
-
-- the preprocessor, `struct`, `switch`, `do`/`while`, `?:`, compound assignment, bitwise operators,
-  floating point, multi-dimensional arrays, pointer variables, `&`, `*`, variadics, `sizeof`
-- anything C leaves undefined, which cannot be differentially tested
-  ([ADR 0008](docs/decisions/0008-reject-undefined-behavior.md))
-
-Four programs are real C that `clang` accepts and this compiler turns down on purpose. They are
-listed, with reasons, in
+Four programs in the invalid corpus are accepted by `clang` and rejected here deliberately. They are
+enumerated with rationale in
 [the architecture](docs/architecture.md#where-this-subset-is-stricter-than-c), and a test fails if
-that list and the corpus ever disagree.
-
-The full grammar lives in
+that enumeration and the corpus diverge. The grammar is in
 [`docs/architecture.md`](docs/architecture.md#the-language-subset).
 
 ## Status
 
-Functionally complete against its own definition of done: sixty-four corpus programs, built by both
-compilers, run, compared byte for byte on stdout, stderr, and exit status. No known mismatches. The
-acceptance run is recorded in [`docs/reports/acceptance.md`](docs/reports/acceptance.md).
+Complete against its stated acceptance criterion: sixty-four corpus programs, compiled by both
+implementations, executed, and compared on stdout, stderr, and exit status, with no known
+mismatches. The run is recorded in [`docs/reports/acceptance.md`](docs/reports/acceptance.md). All
+five phases of [`docs/PLAN.md`](docs/PLAN.md) are complete.
 
-All five phases of [`docs/PLAN.md`](docs/PLAN.md) are done. This section is refreshed every
-iteration, so it records where the project actually is.
+This section is refreshed every iteration and records the project's actual state.
 
-## The tour
+## Source layout
 
-| Where | What is in it |
+| Path | Contents |
 |---|---|
-| `src/diagnostics.rs` | spans, the source map, the caret renderer, notes that point at a second place |
-| `src/lexer/` | a byte scanner that always terminates, decodes literals once, and resynchronizes after a bad one |
-| `src/ast.rs` | the node types, never mutated after parsing, plus the S-expression dump |
-| `src/parser/` | recursive descent and precedence climbing, with recovery and a depth limit |
-| `src/sema/` | types, scopes, a two-pass walk, thirty-one checks, and the tables the backend reads |
-| `src/codegen/` | the emitter, stack frames, expression and statement lowering, calls, data sections |
-| `src/driver.rs` | assembling and linking through `clang`, and cleaning up after itself |
-| `runtime/shim.c` | `print_int`, `print_char`, `print_string`, on `write(2)` and nothing else |
-| `tests/programs/` | sixty-four programs that must work, thirty-one that must be rejected |
-| `tests/differential.rs`, `tests/harness/` | build both ways, run both, compare; and the harness's own self-tests |
-| `tests/generator/` | random well-typed programs, kept defined by interval arithmetic rather than by hope |
-| `fuzz/` | three targets over the front end, seeded from whatever is already in the repo |
+| `src/diagnostics.rs` | spans, source map, caret renderer, spanned notes, diagnostic bag |
+| `src/lexer/` | byte scanner with literal decoding and error resynchronization |
+| `src/ast.rs` | node types, immutable after parsing, and the S-expression dump |
+| `src/parser/` | recursive descent and precedence climbing, with recovery and a depth bound |
+| `src/sema/` | type model, scope stack, two-pass analysis, thirty-one checks, annotation tables |
+| `src/codegen/` | emitter, frame layout, expression and statement lowering, calls, data sections |
+| `src/driver.rs` | toolchain invocation, temporary-file management, error propagation |
+| `runtime/shim.c` | `print_int`, `print_char`, `print_string`, implemented on `write(2)` |
+| `tests/programs/` | sixty-four valid programs and thirty-one that must be rejected |
+| `tests/differential.rs`, `tests/harness/` | the comparison harness and its self-tests |
+| `tests/generator/` | random well-typed program generation bounded by interval arithmetic |
+| `fuzz/` | three `cargo-fuzz` targets over the front end |
 
 ## Testing
 
-`cargo test` runs every tier. Each one catches what the tier below it cannot, and each can be run
-alone, which is what to do when one of them goes red.
+`cargo test` runs every tier; each is independently invocable.
 
-1. `cargo test --lib`: unit tests, no C compiled. Answers in under a second.
+1. `cargo test --lib`: in-crate unit tests, no compilation or linking.
 2. `cargo test --test lexer_snapshots --test parser_snapshots --test sema_snapshots --test codegen_snapshots`:
-   tokens, tree, annotations, and assembly against checked-in files.
-3. `cargo test --test codegen_exec`: every corpus program compiled, run, and checked.
-4. `cargo test --test differential`: the acceptance suite — both compilers, both binaries, compared.
-5. `cargo test --test generated`: the same comparison, over programs nobody wrote.
-6. `cargo test --test invalid_programs`: the programs that must stay rejected.
-7. `cargo test --test frontend_no_panic`: truncated, adversarial, and previously-crashing input.
-8. `cargo test --test harness_self_tests`: the harness fed wrong answers on purpose, because a
-   harness that cannot fail proves nothing.
+   token stream, syntax tree, annotations, and emitted assembly against checked-in snapshots.
+3. `cargo test --test codegen_exec`: corpus programs compiled, executed, and checked against
+   recorded expectations.
+4. `cargo test --test differential`: the acceptance suite, one test per program.
+5. `cargo test --test generated`: the same comparison over generated programs.
+6. `cargo test --test invalid_programs`: programs that must be rejected, each against its rule.
+7. `cargo test --test frontend_no_panic`: truncated, adversarial, and regression inputs.
+8. `cargo test --test harness_self_tests`: fault injection on each comparison axis of the harness.
 
-When a differential test fails it names a directory holding both binaries, both captures of their
-output, and the assembly `rustycc` produced, so the failure can be taken apart without reproducing
-it first.
+A differential failure reports a directory containing both binaries, both output captures, and the
+emitted assembly, so it can be diagnosed without reproduction.
 
-Fuzzing needs a nightly toolchain and `cargo-fuzz`, which the compiler itself does not:
+Fuzzing requires a nightly toolchain and `cargo-fuzz`, which the compiler itself does not:
 
 ```bash
 rustup toolchain install nightly && cargo install cargo-fuzz
-./scripts/fuzz.sh lex             # also: parse, frontend
+./scripts/fuzz.sh lex        # also: parse, frontend
 ```
 
-Environment overrides, snapshot triage, crash minimization, and the rest are in
+Environment overrides, snapshot triage, and crash minimization are documented in
 [`docs/CHEATSHEET.md`](docs/CHEATSHEET.md).
 
 ## Documentation
 
-[Architecture](docs/architecture.md) is the place to start: the passes, the grammar, the code
-generation strategy, and the testing architecture, each with a dive-deeper for the exact detail.
-
-From there — [the phase explanations](docs/explanations/index.md) narrate how it was built,
-[Decisions](docs/decisions/index.md) holds the ten ADRs and the arguments behind them,
-[the plan](docs/PLAN.md) is what was built when, [the proposal](docs/PROPOSAL.md) is where it
-started, and [AGENTS.md](AGENTS.md) is how to work in the repo.
+[Architecture](docs/architecture.md) is the entry point: pipeline, grammar, code generation strategy,
+and testing architecture, each with a dive-deeper section for exact detail. Beyond it,
+[the phase explanations](docs/explanations/index.md) cover the implementation in order,
+[Decisions](docs/decisions/index.md) holds ten ADRs, [the plan](docs/PLAN.md) records scope per
+phase, [the proposal](docs/PROPOSAL.md) is the original statement of intent, and
+[AGENTS.md](AGENTS.md) documents repository conventions.
