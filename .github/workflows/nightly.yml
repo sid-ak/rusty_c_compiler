@@ -31,6 +31,24 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # The fuzz crate is its own workspace, so `cargo fmt` and `cargo clippy` at the repository root do
+  # not reach it and the pull-request checks say nothing about it. It is linted here, where nightly
+  # is installed anyway, rather than left as the one directory nothing checks.
+  lint:
+    name: lint the fuzz targets
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the nightly toolchain
+        run: rustup toolchain install nightly --profile minimal --component rustfmt clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - run: cargo +nightly fmt --check
+        working-directory: fuzz
+      - run: cargo +nightly clippy --all-targets -- -D warnings
+        working-directory: fuzz
+
   fuzz:
     name: fuzz ${{ matrix.target }}
     runs-on: macos-14
