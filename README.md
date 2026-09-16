@@ -9,16 +9,19 @@ correct.
 
 ## Status
 
-The front end is complete. `rustycc` builds and runs from a clean checkout, and takes a C source
-file through lexing, parsing, and semantic analysis. `rustycc --check program.c` answers whether a
-program is one this compiler will accept, and `rustycc --dump-tokens`, `--dump-ast`, and
-`--dump-annotations` print what each stage made of it. A program it turns down comes back as
-diagnostics with a caret under the offending text — one per mistake, in source order, with a second
-caret under the earlier declaration where a name collides with one, and a construct that is real C
-this subset simply does not implement told apart from one that is malformed.
+`rustycc` compiles a subset of C to a native macOS executable. `rustycc program.c -o program`
+produces a program that runs, and every program in the test corpus produces byte-for-byte the same
+output as the same program built by `clang -O0 -std=c99`.
 
-It does not yet generate code, so it cannot produce an executable: `rustycc program.c -o program`
-accepts its arguments and runs the stages that exist.
+The pipeline runs end to end: source text to tokens, tokens to a syntax tree, the tree to types and
+bindings, and those to ARM64 assembly that `clang` assembles and links against the runtime shim.
+`--dump-tokens`, `--dump-ast`, `--dump-annotations`, and `-S` print what each stage made of a file;
+`--check` answers whether a program is accepted, with diagnostics carrying a caret under the
+offending text — one per mistake, in source order, and a second caret under the earlier declaration
+where a name collides with one.
+
+Not built yet: the differential harness that replaces the corpus's recorded expectations with
+`clang` run side by side, the fuzzing targets, and the random program generator.
 
 In the repo:
 
@@ -33,26 +36,30 @@ In the repo:
   S-expression dump that parser tests assert against.
 - `src/parser/` — recursive descent over declarations and statements, precedence climbing over
   expressions, panic-mode recovery that provably consumes a token per step, and a limit on how
-  deep the tree may grow — through nesting or through long operator chains — that turns a hostile
-  input into a diagnostic rather than a stack overflow.
+  deep the tree may grow that turns a hostile input into a diagnostic rather than a stack overflow.
 - `src/sema/` — the type model and its promotion, decay, and compatibility rules; a scope stack
   resolving every identifier; a two-pass walk that registers the top level before it walks any body,
   so a call to a function defined later in the file resolves; thirty-one checks, each with its own
-  message and span; and the annotation tables code generation will read.
-- `tests/programs/` — five subset-C programs, one per feature area, and thirty-one in `invalid/`
-  that must stay rejected, each with a coverage matrix CI holds them to. The valid ones are the
-  parser's and analyzer's snapshots now and the differential corpus later.
+  message and span; and the annotation tables code generation reads.
+- `src/codegen/` — the assembly emitter and Mach-O conventions, stack frame layout with a fixed slot
+  for every value, expression lowering where each instruction reads its operands in source order,
+  control flow with a loop-context stack, Apple's ARM64 calling convention, and the data sections.
+- `src/driver.rs` — assembling and linking through `clang`, with intermediates removed however the
+  run ends and a toolchain failure reported in the toolchain's own words.
+- `tests/programs/` — seven subset-C programs covering the grammar, each carrying the exit code and
+  stdout `clang` produces for it, and thirty-one in `invalid/` that must stay rejected. Both have a
+  coverage matrix CI holds them to.
 - `runtime/shim.c` — `print_int`, `print_char`, and `print_string` on `write(2)`, compiled once by
-  the build script into the object both compilers will link in differential testing.
-- `.github/workflows/ci.yml` — fmt, clippy, and test on an Apple Silicon runner, behind a preflight
-  that checks the C toolchain resolves.
+  the build script into the object both compilers link against.
+- `.github/workflows/ci.yml` — fmt, clippy, test, and docs on an Apple Silicon runner, behind a
+  preflight that checks the C toolchain resolves.
 
 Four programs in `tests/programs/invalid/` are real C that `clang` builds and this compiler rejects
 on purpose. They are listed in
 [`docs/architecture.md`](docs/architecture.md#where-this-subset-is-stricter-than-c), and a test fails
 if that list and the corpus disagree.
 
-Code generation and the differential suite are open, tracked as
+Differential testing, fuzzing, and system acceptance are open, tracked as
 [GitHub issues](https://github.com/sid-ak/rusty_c_compiler/issues) under one milestone per phase.
 The design and subset grammar are in [`docs/architecture.md`](docs/architecture.md), the phased plan
 in [`docs/PLAN.md`](docs/PLAN.md), ten ADRs in [`docs/decisions/`](docs/decisions/index.md), the
@@ -110,6 +117,11 @@ To see what the compiler makes of a file:
    printing nothing when the program is accepted.
 5. `./target/debug/rustycc --check broken.c`: on a rejected file, print a diagnostic with the
    offending line and a caret, and exit non-zero.
+6. `./target/debug/rustycc program.c -S -o program.s`: write the ARM64 assembly and no binary.
+7. `./target/debug/rustycc program.c -o program && ./program`: compile, link, and run it.
+
+A program that calls `print_int`, `print_char`, or `print_string` declares them itself — there is no
+preprocessor, so there is no header to include — and the driver links the shim in automatically.
 
 The toolchain is pinned in `rust-toolchain.toml`, so `cargo` installs the right compiler on its own.
 Complete instructions for building and running every tier of tests are a Phase 5 deliverable

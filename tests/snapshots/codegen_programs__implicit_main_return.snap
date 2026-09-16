@@ -1,0 +1,21 @@
+---
+source: tests/codegen_programs.rs
+expression: "int main(void) { int x; x = 5; }"
+---
+	.section	__TEXT,__text,regular,pure_instructions
+	.globl	_main
+	.p2align	2
+_main:
+	stp x29, x30, [sp, #-48]!
+	mov x29, sp
+	add x0, x29, #16
+	str x0, [x29, #24]
+	movz w0, #5
+	ldr x2, [x29, #24]
+	str w0, [x2]
+	mov w0, #0
+Lmain_return_0:
+	mov sp, x29
+	ldp x29, x30, [sp], #48
+	ret
+.subsections_via_symbols

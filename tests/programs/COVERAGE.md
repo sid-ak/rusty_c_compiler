@@ -8,6 +8,11 @@ This matrix is the record of which language features the corpus actually reaches
 a `.c` file in this directory with no row below fails `cargo test`, because a program nobody wrote
 a row for is a program nobody knows the purpose of.
 
+Each program also carries the exit code and stdout it should produce, in an `// expect-exit:` and
+`// expect-stdout:` header. Those values were recorded from `clang -O0 -std=c99`, not from
+`rustycc`, so they are an independent answer rather than a note of what this compiler happened to do.
+`cargo test --test codegen_exec` holds every program to them, one test per program.
+
 ## Programs
 
 | Program | What it is for |
@@ -17,6 +22,8 @@ a row for is a program nobody knows the purpose of.
 | [`functions.c`](functions.c) | Forward declarations, recursion, `void`, and parameter counts across the ABI boundary |
 | [`arrays.c`](arrays.c) | Declaring, indexing, initializing, and passing arrays |
 | [`strings.c`](strings.c) | String literals, `char` arrays, escapes, and the null terminator |
+| [`sorting.c`](sorting.c) | Reversing, sorting, and searching an array through helpers that mutate it in place |
+| [`recursion.c`](recursion.c) | Mutual recursion, Ackermann, recursion filling an array, and all three together with string output |
 
 ## Features
 
@@ -41,18 +48,23 @@ a row for is a program nobody knows the purpose of.
 | Nested blocks and the empty statement | `control_flow.c` |
 | Function definitions and calls | `functions.c` |
 | Forward declarations | `functions.c`, `arrays.c`, `strings.c` |
-| Recursion, single and double | `functions.c` |
+| Recursion, single and double | `functions.c`, `recursion.c` |
+| Mutual recursion | `recursion.c` |
+| Recursion nested inside an argument list | `recursion.c` |
 | `void` return and `(void)` parameter lists | `functions.c` |
 | Eight and nine parameters | `functions.c` |
 | Array declaration and indexing | `arrays.c` |
 | Array initializer lists, full and partial | `arrays.c` |
 | Array parameters `int a[]` | `arrays.c`, `strings.c` |
-| Writing through an index | `arrays.c` |
+| Writing through an index | `arrays.c`, `sorting.c` |
+| An array mutated in place through a helper | `arrays.c`, `sorting.c`, `recursion.c` |
+| Swapping, reversing, and sorting an array | `sorting.c` |
+| Nested loops over one array | `sorting.c` |
 | String literals as arguments | `strings.c` |
 | `char` array initialized from a string literal | `strings.c` |
 | Escape sequences | `strings.c` |
 | The null terminator | `strings.c` |
-| The runtime shim's three functions | all five |
+| The runtime shim's three functions | every program |
 
 ## Not yet covered
 

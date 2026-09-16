@@ -1,0 +1,37 @@
+---
+source: tests/codegen_programs.rs
+expression: "void print_string(char s[]);\nint answer(void) { print_string(\"one\"); print_string(\"two\"); print_string(\"one\"); return 0; }"
+---
+	.section	__TEXT,__text,regular,pure_instructions
+	.globl	_answer
+	.p2align	2
+_answer:
+	stp x29, x30, [sp, #-48]!
+	mov x29, sp
+	adrp x0, l_.str.0@PAGE
+	add x0, x0, l_.str.0@PAGEOFF
+	str x0, [x29, #32]
+	ldr x0, [x29, #32]
+	bl _print_string
+	adrp x0, l_.str.1@PAGE
+	add x0, x0, l_.str.1@PAGEOFF
+	str x0, [x29, #32]
+	ldr x0, [x29, #32]
+	bl _print_string
+	adrp x0, l_.str.0@PAGE
+	add x0, x0, l_.str.0@PAGEOFF
+	str x0, [x29, #32]
+	ldr x0, [x29, #32]
+	bl _print_string
+	movz w0, #0
+	b Lanswer_return_0
+Lanswer_return_0:
+	mov sp, x29
+	ldp x29, x30, [sp], #48
+	ret
+	.section	__TEXT,__cstring,cstring_literals
+l_.str.0:
+	.asciz	"one"
+l_.str.1:
+	.asciz	"two"
+.subsections_via_symbols

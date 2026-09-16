@@ -1,0 +1,27 @@
+---
+source: tests/codegen_programs.rs
+expression: "int answer(void) { return 1 + 2 * 3; }"
+---
+	.section	__TEXT,__text,regular,pure_instructions
+	.globl	_answer
+	.p2align	2
+_answer:
+	stp x29, x30, [sp, #-48]!
+	mov x29, sp
+	movz w0, #1
+	str w0, [x29, #16]
+	movz w0, #2
+	str w0, [x29, #24]
+	movz w0, #3
+	mov w1, w0
+	ldr w0, [x29, #24]
+	mul w0, w0, w1
+	mov w1, w0
+	ldr w0, [x29, #16]
+	add w0, w0, w1
+	b Lanswer_return_0
+Lanswer_return_0:
+	mov sp, x29
+	ldp x29, x30, [sp], #48
+	ret
+.subsections_via_symbols

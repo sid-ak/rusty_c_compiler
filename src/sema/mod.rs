@@ -1106,9 +1106,13 @@ fn is_always_true(expr: &Expr) -> bool {
 
 /// The value `expr` folds to, or `None` if it is not a constant expression.
 ///
+/// Public because code generation writes global initializers into the data section and needs the
+/// same answer this pass used to accept them. One implementation rather than two: a second folder
+/// that disagreed with this one would accept a program here and emit something else there.
+///
 /// Only the forms a data-section initializer can hold: literals and arithmetic over them. A name,
 /// a call, or an assignment is not constant however simple it looks.
-fn constant_value(expr: &Expr) -> Option<i32> {
+pub fn constant_value(expr: &Expr) -> Option<i32> {
     use crate::ast::BinOp;
 
     match &expr.kind {

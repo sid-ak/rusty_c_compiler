@@ -1,5 +1,7 @@
 // Branches and loops: every statement form the subset has, including each combination of a
 // present and an absent `for` clause, and both ways out of a loop early.
+// expect-exit: 0
+// expect-stdout: 13683012010101313134011011100\n
 
 void print_int(int n);
 void print_char(char c);

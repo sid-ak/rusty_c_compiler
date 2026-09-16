@@ -1,5 +1,7 @@
 // Arrays: declaring them with and without an initializer list, indexing them for reading and for
 // writing, and passing one to a function, which is the only place an array decays to a pointer.
+// expect-exit: 0
+// expect-stdout: 0161330271735342424ac\n
 
 void print_int(int n);
 void print_char(char c);

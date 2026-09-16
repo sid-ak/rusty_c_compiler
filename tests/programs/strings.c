@@ -1,5 +1,7 @@
 // Strings and characters: string literals as arguments, a `char` array initialized from one, and
 // every escape sequence the subset decodes.
+// expect-exit: 0
+// expect-stdout: hello, world\ntab:\there\nquote:" backslash:\\ single:'\naZ0 \t\n65321hello\n104111750abc0\n
 
 void print_int(int n);
 void print_char(char c);

@@ -1,0 +1,43 @@
+---
+source: tests/codegen_programs.rs
+expression: "int answer(void) { int n = 0; while (n < 3) { n = n + 1; } return n; }"
+---
+	.section	__TEXT,__text,regular,pure_instructions
+	.globl	_answer
+	.p2align	2
+_answer:
+	stp x29, x30, [sp, #-48]!
+	mov x29, sp
+	movz w0, #0
+	str w0, [x29, #16]
+Lwhile_top_1:
+	add x0, x29, #16
+	ldr w0, [x0]
+	str w0, [x29, #24]
+	movz w0, #3
+	mov w1, w0
+	ldr w0, [x29, #24]
+	cmp w0, w1
+	cset w0, lt
+	cbz w0, Lwhile_end_2
+	add x0, x29, #16
+	str x0, [x29, #24]
+	add x0, x29, #16
+	ldr w0, [x0]
+	str w0, [x29, #32]
+	movz w0, #1
+	mov w1, w0
+	ldr w0, [x29, #32]
+	add w0, w0, w1
+	ldr x2, [x29, #24]
+	str w0, [x2]
+	b Lwhile_top_1
+Lwhile_end_2:
+	add x0, x29, #16
+	ldr w0, [x0]
+	b Lanswer_return_0
+Lanswer_return_0:
+	mov sp, x29
+	ldp x29, x30, [sp], #48
+	ret
+.subsections_via_symbols

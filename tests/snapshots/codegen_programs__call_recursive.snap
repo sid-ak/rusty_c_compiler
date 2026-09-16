@@ -1,0 +1,59 @@
+---
+source: tests/codegen_programs.rs
+expression: "int f(int n) { if (n <= 1) { return 1; } return n * f(n - 1); }\nint answer(void) { return f(5); }"
+---
+	.section	__TEXT,__text,regular,pure_instructions
+	.globl	_f
+	.p2align	2
+_f:
+	stp x29, x30, [sp, #-64]!
+	mov x29, sp
+	str w0, [x29, #16]
+	add x0, x29, #16
+	ldr w0, [x0]
+	str w0, [x29, #24]
+	movz w0, #1
+	mov w1, w0
+	ldr w0, [x29, #24]
+	cmp w0, w1
+	cset w0, le
+	cbz w0, Lif_end_1
+	movz w0, #1
+	b Lf_return_0
+Lif_end_1:
+	add x0, x29, #16
+	ldr w0, [x0]
+	str w0, [x29, #24]
+	add x0, x29, #16
+	ldr w0, [x0]
+	str w0, [x29, #32]
+	movz w0, #1
+	mov w1, w0
+	ldr w0, [x29, #32]
+	sub w0, w0, w1
+	str x0, [x29, #56]
+	ldr x0, [x29, #56]
+	bl _f
+	mov w1, w0
+	ldr w0, [x29, #24]
+	mul w0, w0, w1
+	b Lf_return_0
+Lf_return_0:
+	mov sp, x29
+	ldp x29, x30, [sp], #64
+	ret
+	.globl	_answer
+	.p2align	2
+_answer:
+	stp x29, x30, [sp, #-48]!
+	mov x29, sp
+	movz w0, #5
+	str x0, [x29, #32]
+	ldr x0, [x29, #32]
+	bl _f
+	b Lanswer_return_2
+Lanswer_return_2:
+	mov sp, x29
+	ldp x29, x30, [sp], #48
+	ret
+.subsections_via_symbols

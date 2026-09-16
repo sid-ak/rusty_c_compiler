@@ -13,20 +13,20 @@ The operand convention is that the instruction always sees the left operand in `
 instruction turns out to be — lowers to the same six steps:
 
 1. Evaluate the left operand; its result ends up in `w0`.
-2. Spill it: `str w0, [x29, #-T]` saves that result into this node's own temp slot, freeing `w0` for
+2. Spill it: `str w0, [x29, #T]` saves that result into this node's own temp slot, freeing `w0` for
    the right operand.
 3. Evaluate the right operand; its result also ends up in `w0`.
 4. Move it aside: `mov w1, w0` puts the right operand's result in `w1`, out of the way.
-5. Reload the left operand: `ldr w0, [x29, #-T]` brings it back from the temp slot into `w0`.
+5. Reload the left operand: `ldr w0, [x29, #T]` brings it back from the temp slot into `w0`.
 6. Apply the instruction — for example `sub w0, w0, w1` — which now reads the left operand from `w0`
    and the right operand from `w1`, in source order.
 
 ```
         <evaluate left into w0>     // 1: left operand
-        str  w0, [x29, #-T]         // 2: spill left into this node's temp slot
+        str  w0, [x29, #T]          // 2: spill left into this node's temp slot
         <evaluate right into w0>    // 3: right operand
         mov  w1, w0                 // 4: right into w1
-        ldr  w0, [x29, #-T]         // 5: left back into w0
+        ldr  w0, [x29, #T]         // 5: left back into w0
         sub  w0, w0, w1             // 6: every instruction reads left, right
 ```
 
@@ -42,15 +42,38 @@ instruction on the `mov` buys the property that every emitted instruction reads 
 ## The prologue and the frame
 
 Before a function can run its own logic it needs a safe workspace that will not overwrite data
-belonging to whoever called it. The prologue is `stp x29, x30, [sp, #-N]!` followed by
-`mov x29, sp`, with the frame size rounded up to a multiple of 16 as the ARM64 ABI (AAPCS64)
-requires. Every local, spilled parameter, and expression temporary gets a fixed `x29`-relative
-offset; the temporary region is sized from the function's maximum expression depth, so nested
-expressions cannot collide with each other's slots. Parameters arrive in registers and are
+belonging to whoever called it. `x29` sits at the bottom of that workspace and every offset into it
+is positive, whatever the frame's size:
+
+```text
+  higher addresses
+  ...                        the caller's frame
+  [x29, #N)                  temporaries, one per expression nesting level
+  ...                        locals and spilled parameters
+  [x29, #16)                 first slot
+  [x29, #8]                  saved x30, the return address
+  [x29, #0]   <- x29         saved x29, the caller's frame pointer
+  [sp, #0)                   arguments this function passes on the stack, if any
+  lower addresses
+```
+
+A small frame with nothing to pass on the stack opens with `stp x29, x30, [sp, #-N]!` followed by
+`mov x29, sp`. That immediate reaches 512 bytes, so anything larger lowers the stack pointer on its
+own and stores the pair where it lands. Both shapes leave `x29` in the same place relative to the
+slots, which is the point: a compiler using one offset convention for small frames and another for
+large ones would read a slot from the wrong side of the frame pointer in exactly the programs least
+likely to be tested.
+
+The frame size is rounded up to a multiple of 16 as AAPCS64 requires, and the stack pointer never
+moves again, so it is still 16-byte aligned at every call site by construction rather than by
+arithmetic at each one. The temporary region is sized from the function's maximum expression depth,
+so nested expressions cannot collide with each other's slots. Parameters arrive in registers and are
 immediately spilled to their slots in the prologue, so the function body treats parameters and
-locals identically. Offsets that fall outside the immediate range of `ldr`/`str` are materialized
-into a scratch register rather than silently truncated. Each function has exactly one epilogue, and
-every `return` branches to it.
+locals identically — and a parameter that arrived on the stack is copied into a slot too, for the
+same reason. Offsets outside the immediate range of `ldr`/`str` are materialized into a scratch
+register rather than silently truncated; those ranges are 16380 in multiples of four for a word,
+4095 for a byte, and 32760 in multiples of eight for a doubleword. Each function has exactly one
+epilogue, and every `return` branches to it.
 
 ## Specific lowerings worth naming
 
@@ -76,11 +99,21 @@ Each of these is an edge case or a hardware quirk that needs care:
   by address with `adrp`+`add`. That address is exactly the `char *` the
   [runtime shim](#the-runtime-shim) expects.
 
-## Calls follow AAPCS64
+## Calls follow Apple's ARM64 convention
 
-The first eight integer or pointer arguments go in `x0`–`x7`, the rest on the stack with the
-required alignment; the return value comes back in `w0`/`x0`; the stack pointer is 16-byte aligned
-at every call site. Argument expressions are fully evaluated into temp slots before any argument
-register is loaded, which is what keeps a nested call like `f(g(1), h(2))` from clobbering an
-argument that has already been placed. Nine-argument functions appear in the test corpus
-specifically because nine is the first arity that crosses the register-to-stack boundary.
+The first eight integer or pointer arguments go in `x0`–`x7` and the return value comes back in
+`w0`/`x0`, as AAPCS64 says. What the ninth argument does is where Apple's platforms differ from the
+generic document, and the difference matters: a stack argument is packed at its natural size and
+alignment rather than given eight bytes of its own, so a ninth `int` occupies four bytes. Following
+the generic rule would put every stack argument at the wrong offset.
+
+Room for those arguments is reserved at the bottom of the caller's own frame rather than by moving
+the stack pointer around each call, which is what keeps the stack pointer 16-byte aligned without
+any arithmetic at the call site.
+
+Argument expressions are fully evaluated into slots before any argument register is loaded. Doing it
+the other way — place `x0`, then evaluate the next argument — loses `x0` the moment an argument is
+itself a call, because that call places its own arguments in the same registers. Those slots are
+indexed by call nesting as well as by position, so `f(g(1), h(2))` cannot have `g`'s arguments
+written over `f`'s. Nine-argument functions appear in the test corpus specifically because nine is
+the first arity that crosses the register-to-stack boundary.

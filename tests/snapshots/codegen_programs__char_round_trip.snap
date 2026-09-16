@@ -1,0 +1,20 @@
+---
+source: tests/codegen_programs.rs
+expression: "int answer(void) { char c = 'A'; return c; }"
+---
+	.section	__TEXT,__text,regular,pure_instructions
+	.globl	_answer
+	.p2align	2
+_answer:
+	stp x29, x30, [sp, #-32]!
+	mov x29, sp
+	movz w0, #65
+	strb w0, [x29, #16]
+	add x0, x29, #16
+	ldrsb w0, [x0]
+	b Lanswer_return_0
+Lanswer_return_0:
+	mov sp, x29
+	ldp x29, x30, [sp], #32
+	ret
+.subsections_via_symbols

@@ -1,0 +1,32 @@
+---
+source: tests/codegen_programs.rs
+expression: "int a[3] = {4, 5, 6};\nint answer(void) { return a[0]; }"
+---
+	.section	__TEXT,__text,regular,pure_instructions
+	.globl	_answer
+	.p2align	2
+_answer:
+	stp x29, x30, [sp, #-32]!
+	mov x29, sp
+	adrp x0, _a@PAGE
+	add x0, x0, _a@PAGEOFF
+	str x0, [x29, #16]
+	movz w0, #0
+	sxtw x1, w0
+	ldr x0, [x29, #16]
+	movz x2, #4
+	madd x0, x1, x2, x0
+	ldr w0, [x0]
+	b Lanswer_return_0
+Lanswer_return_0:
+	mov sp, x29
+	ldp x29, x30, [sp], #32
+	ret
+	.section	__DATA,__data
+	.globl	_a
+	.p2align	2
+_a:
+	.long	4
+	.long	5
+	.long	6
+.subsections_via_symbols

@@ -1,0 +1,24 @@
+---
+source: tests/codegen_programs.rs
+expression: "int answer(void) { int i = 5; return i++; }"
+---
+	.section	__TEXT,__text,regular,pure_instructions
+	.globl	_answer
+	.p2align	2
+_answer:
+	stp x29, x30, [sp, #-48]!
+	mov x29, sp
+	movz w0, #5
+	str w0, [x29, #16]
+	add x0, x29, #16
+	str x0, [x29, #24]
+	ldr w0, [x0]
+	add w1, w0, #1
+	ldr x2, [x29, #24]
+	str w1, [x2]
+	b Lanswer_return_0
+Lanswer_return_0:
+	mov sp, x29
+	ldp x29, x30, [sp], #48
+	ret
+.subsections_via_symbols

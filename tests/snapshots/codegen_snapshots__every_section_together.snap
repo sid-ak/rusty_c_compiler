@@ -1,0 +1,32 @@
+---
+source: tests/codegen_snapshots.rs
+expression: every_section()
+---
+	.section	__TEXT,__text,regular,pure_instructions
+	.globl	_main
+	.p2align	2
+_main:
+	adrp x0, l_.str.0@PAGE
+	add x0, x0, l_.str.0@PAGEOFF
+	bl _print_string
+	cbz w0, Ldone_0
+	adrp x8, _counter@PAGE
+	add x8, x8, _counter@PAGEOFF
+	ldr w0, [x8]
+Ldone_0:
+	ret
+	.section	__TEXT,__cstring,cstring_literals
+l_.str.0:
+	.asciz	"hi\n"
+	.section	__DATA,__data
+	.globl	_counter
+	.p2align	2
+_counter:
+	.long	7
+	.globl	_letters
+	.p2align	0
+_letters:
+	.ascii	"\001\002\003\000"
+	.globl	_blank
+.zerofill __DATA,__bss,_blank,40,2
+.subsections_via_symbols
