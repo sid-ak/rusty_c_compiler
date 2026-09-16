@@ -152,8 +152,7 @@ on its own, which is what to do when one of them is red.
 3. `cargo test --test codegen_exec`: every corpus program compiled by `rustycc`, run, and checked
    against the exit code and stdout recorded in its own header.
 4. `cargo test --test differential`: the acceptance suite — every corpus program built by both
-   compilers, both run, and compared. One test per program, so `cargo test --test differential --
-   arrays` scopes to one.
+   compilers, both run, and compared. Each program is its own test, so a name filter scopes to one.
     - `RUSTYCC_DIFF_TIMEOUT_SECS=30 cargo test --test differential`: raise the wall-clock limit a
       compiled program is given, on a slow or heavily loaded machine.
 5. `cargo test --test generated`: the same comparison over randomly generated programs.
@@ -162,8 +161,9 @@ on its own, which is what to do when one of them is red.
       printed, which reproduces its program byte for byte.
 6. `cargo test --test invalid_programs`: the programs that must be rejected, each held to the rule
    it names.
-7. `cargo test --test frontend_no_panic`: the front end against truncated, adversarial, and
-   previously crashing input, on a deliberately small stack.
+7. `cargo test --test frontend_no_panic`: the front end against every corpus program cut short at
+   every byte, the hand-written adversarial inputs, and anything a past fuzz run crashed on, each
+   held to finishing rather than only to not crashing.
 8. `cargo test --test harness_self_tests`: the differential harness's own tests, which inject a
    wrong answer on each comparison axis.
 
