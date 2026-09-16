@@ -26,6 +26,23 @@ use crate::sema::types::{Conversion, Ty};
 /// A second scratch register, live only within the instruction pair that uses it.
 const SECOND: &str = "2";
 
+/// How many arguments travel in registers before the rest go on the stack.
+const ARGUMENT_REGISTERS: usize = 8;
+
+/// `value` rounded up to the next multiple of `alignment`.
+fn align_up(value: u64, alignment: u64) -> u64 {
+    if alignment == 0 {
+        return value;
+    }
+
+    let remainder = value % alignment;
+    if remainder == 0 {
+        return value;
+    }
+
+    value.saturating_add(alignment - remainder)
+}
+
 impl Generator<'_> {
     /// Lowers `expr`, leaving its value in `w0`.
     pub(crate) fn expr(&mut self, expr: &Expr) {
@@ -47,7 +64,7 @@ impl Generator<'_> {
             ExprKind::Binary { op, left, right } => self.binary(*op, left, right, expr),
             ExprKind::Assign { target, value } => self.assign(target, value, expr),
             ExprKind::PostfixIncDec { op, operand } => self.postfix(*op, operand, expr),
-            ExprKind::Call { .. } => self.unlowered(expr.span, "a function call"),
+            ExprKind::Call { callee, args } => self.call(callee, args, expr),
         }
     }
 
@@ -308,6 +325,81 @@ impl Generator<'_> {
         self.emitter.load_immediate(&format!("x{SECOND}"), stride);
         self.emitter
             .instruction(&format!("madd x0, x1, x{SECOND}, x0"));
+    }
+
+    /// Lowers a call, leaving the return value in `w0`.
+    ///
+    /// Every argument is evaluated and parked in a slot before any argument register is loaded.
+    /// Doing it the other way — place `x0`, then evaluate the next argument — loses `x0` the moment
+    /// an argument is itself a call, because that call places its own arguments in the same
+    /// registers. The slots are indexed by call nesting as well as by position, so `f(g(1))` does
+    /// not have `g`'s arguments written over `f`'s.
+    fn call(&mut self, callee: &Expr, args: &[Expr], whole: &Expr) {
+        let ExprKind::Ident(name) = &callee.kind else {
+            self.unlowered(whole.span, "a call to something other than a name");
+
+            return;
+        };
+        let name = name.clone();
+        let depth = self.call_depth;
+
+        for (position, arg) in args.iter().enumerate() {
+            let Ok(index) = u32::try_from(position) else {
+                continue;
+            };
+            let Some(slot) = self.layout.argument(depth, index) else {
+                self.unlowered(
+                    arg.span,
+                    "a call with more arguments than its frame allows for",
+                );
+
+                return;
+            };
+
+            self.call_depth = depth.saturating_add(1);
+            self.expr(arg);
+            self.call_depth = depth;
+
+            // Parked eight bytes wide whatever the argument is, so a pointer fits and a promoted
+            // `char` keeps the sign extension `ldrsb` already gave it.
+            self.emitter.store_to_frame("x0", Width::Double, slot);
+        }
+
+        self.place_arguments(args, depth);
+        self.emitter.call(&name);
+    }
+
+    /// Moves the parked arguments into the registers and stack positions the callee expects.
+    fn place_arguments(&mut self, args: &[Expr], depth: u32) {
+        let mut stack_cursor = 0;
+
+        for (position, arg) in args.iter().enumerate() {
+            let Ok(index) = u32::try_from(position) else {
+                continue;
+            };
+            let Some(slot) = self.layout.argument(depth, index) else {
+                continue;
+            };
+
+            if position < ARGUMENT_REGISTERS {
+                self.emitter
+                    .load_from_frame(&format!("x{position}"), Width::Double, slot);
+
+                continue;
+            }
+
+            // Apple's ARM64 platforms pack stack arguments at their natural size and alignment
+            // rather than giving each one eight bytes, so the width the callee will read with is
+            // the width this has to be written with.
+            let width = self.width_of(arg.id);
+            let size = element_stride(width);
+            stack_cursor = align_up(stack_cursor, size);
+
+            self.emitter.load_from_frame("w8", width, slot);
+            self.emitter
+                .instruction(&format!("{} w8, [sp, #{stack_cursor}]", width.store()));
+            stack_cursor = stack_cursor.saturating_add(size);
+        }
     }
 
     /// Puts the address of a string literal's bytes into `x0`.

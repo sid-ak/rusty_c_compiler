@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use rustycc::codegen::emit::{Emitter, Width};
-use rustycc::codegen::frame::FrameLayout;
+use rustycc::codegen::frame::{FrameLayout, Requirements};
 use rustycc::sema::annotations::{Frame, FrameSlot};
 use rustycc::sema::scope::{SlotId, SymbolKind};
 use rustycc::sema::types::Ty;
@@ -179,7 +179,7 @@ fn far_slot_program() -> String {
     let frame = Frame {
         slots: vec![local(0, "padding", 40_000, 4), local(1, "far", 4, 4)],
     };
-    let layout = FrameLayout::build(&frame, 0);
+    let layout = FrameLayout::build(&frame, Requirements::default());
     let far = layout
         .offset_of(SlotId(1))
         .expect("the far slot is laid out");
@@ -220,7 +220,7 @@ fn a_char_slot_sign_extends_when_it_is_read_back() {
     let frame = Frame {
         slots: vec![local(0, "letter", 1, 1)],
     };
-    let layout = FrameLayout::build(&frame, 0);
+    let layout = FrameLayout::build(&frame, Requirements::default());
     let letter = layout.offset_of(SlotId(0)).expect("the slot is laid out");
 
     let mut emitter = Emitter::new();
@@ -264,7 +264,7 @@ fn parameters_are_readable_from_their_slots_after_the_prologue() {
             },
         ],
     };
-    let layout = FrameLayout::build(&frame, 0);
+    let layout = FrameLayout::build(&frame, Requirements::default());
     let a = layout.offset_of(SlotId(0)).expect("a is laid out");
     let b = layout.offset_of(SlotId(1)).expect("b is laid out");
 

@@ -1,0 +1,68 @@
+---
+source: tests/codegen_programs.rs
+expression: "int f(int a,int b,int c,int d,int e,int g,int h,int i,int j) { return j; }\nint answer(void) { return f(1,2,3,4,5,6,7,8,9); }"
+---
+	.section	__TEXT,__text,regular,pure_instructions
+	.globl	_f
+	.p2align	2
+_f:
+	stp x29, x30, [sp, #-64]!
+	mov x29, sp
+	str w0, [x29, #16]
+	str w1, [x29, #20]
+	str w2, [x29, #24]
+	str w3, [x29, #28]
+	str w4, [x29, #32]
+	str w5, [x29, #36]
+	str w6, [x29, #40]
+	str w7, [x29, #44]
+	ldr w8, [x29, #64]
+	str w8, [x29, #48]
+	add x0, x29, #48
+	ldr w0, [x0]
+	b Lf_return_0
+Lf_return_0:
+	mov sp, x29
+	ldp x29, x30, [sp], #64
+	ret
+	.globl	_answer
+	.p2align	2
+_answer:
+	sub sp, sp, #128
+	stp x29, x30, [sp, #16]
+	add x29, sp, #16
+	movz w0, #1
+	str x0, [x29, #32]
+	movz w0, #2
+	str x0, [x29, #40]
+	movz w0, #3
+	str x0, [x29, #48]
+	movz w0, #4
+	str x0, [x29, #56]
+	movz w0, #5
+	str x0, [x29, #64]
+	movz w0, #6
+	str x0, [x29, #72]
+	movz w0, #7
+	str x0, [x29, #80]
+	movz w0, #8
+	str x0, [x29, #88]
+	movz w0, #9
+	str x0, [x29, #96]
+	ldr x0, [x29, #32]
+	ldr x1, [x29, #40]
+	ldr x2, [x29, #48]
+	ldr x3, [x29, #56]
+	ldr x4, [x29, #64]
+	ldr x5, [x29, #72]
+	ldr x6, [x29, #80]
+	ldr x7, [x29, #88]
+	ldr w8, [x29, #96]
+	str w8, [sp, #0]
+	bl _f
+	b Lanswer_return_1
+Lanswer_return_1:
+	ldp x29, x30, [sp, #16]
+	add sp, sp, #128
+	ret
+.subsections_via_symbols

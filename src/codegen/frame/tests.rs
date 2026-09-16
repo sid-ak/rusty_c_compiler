@@ -44,7 +44,13 @@ fn every_frame_size_is_a_multiple_of_sixteen() {
     ];
 
     for (shape, frame, temporaries) in cases {
-        let layout = FrameLayout::build(&frame, temporaries);
+        let layout = FrameLayout::build(
+            &frame,
+            Requirements {
+                temporaries,
+                ..Requirements::default()
+            },
+        );
 
         assert_eq!(layout.size() % 16, 0, "{shape}: size {}", layout.size());
     }
@@ -53,7 +59,7 @@ fn every_frame_size_is_a_multiple_of_sixteen() {
 /// A frame with nothing in it is still big enough for the saved frame pointer and return address.
 #[test]
 fn an_empty_frame_still_saves_the_frame_pointer_and_return_address() {
-    let layout = FrameLayout::build(&Frame::default(), 0);
+    let layout = FrameLayout::build(&Frame::default(), Requirements::default());
 
     assert_eq!(layout.size(), 16);
 }
@@ -61,7 +67,13 @@ fn an_empty_frame_still_saves_the_frame_pointer_and_return_address() {
 /// Slots start above the saved pair, so nothing can be written over it.
 #[test]
 fn slots_start_above_the_saved_registers() {
-    let layout = FrameLayout::build(&mixed_frame(), 2);
+    let layout = FrameLayout::build(
+        &mixed_frame(),
+        Requirements {
+            temporaries: 2,
+            ..Requirements::default()
+        },
+    );
 
     for entry in mixed_frame().slots {
         let offset = layout
@@ -79,7 +91,13 @@ fn slots_start_above_the_saved_registers() {
 /// Each slot is aligned as its type requires.
 #[test]
 fn every_slot_is_aligned_as_its_type_requires() {
-    let layout = FrameLayout::build(&mixed_frame(), 0);
+    let layout = FrameLayout::build(
+        &mixed_frame(),
+        Requirements {
+            temporaries: 0,
+            ..Requirements::default()
+        },
+    );
 
     for entry in mixed_frame().slots {
         let offset = layout
@@ -105,7 +123,13 @@ fn every_slot_is_aligned_as_its_type_requires() {
 fn no_two_slots_share_a_byte() {
     let frame = mixed_frame();
     let temporaries = 4;
-    let layout = FrameLayout::build(&frame, temporaries);
+    let layout = FrameLayout::build(
+        &frame,
+        Requirements {
+            temporaries,
+            ..Requirements::default()
+        },
+    );
 
     let mut occupied: Vec<(u64, u64, String)> = Vec::new();
     for entry in &frame.slots {
@@ -141,7 +165,13 @@ fn no_two_slots_share_a_byte() {
 /// A slot that was never allocated has no offset, rather than a plausible wrong one.
 #[test]
 fn an_unknown_slot_has_no_offset() {
-    let layout = FrameLayout::build(&mixed_frame(), 1);
+    let layout = FrameLayout::build(
+        &mixed_frame(),
+        Requirements {
+            temporaries: 1,
+            ..Requirements::default()
+        },
+    );
 
     assert_eq!(layout.offset_of(SlotId(99)), None);
     assert_eq!(layout.temporary(1), None);
@@ -150,8 +180,20 @@ fn an_unknown_slot_has_no_offset() {
 /// Laying out the same frame twice gives the same answer.
 #[test]
 fn layout_is_deterministic() {
-    let first = FrameLayout::build(&mixed_frame(), 3);
-    let second = FrameLayout::build(&mixed_frame(), 3);
+    let first = FrameLayout::build(
+        &mixed_frame(),
+        Requirements {
+            temporaries: 3,
+            ..Requirements::default()
+        },
+    );
+    let second = FrameLayout::build(
+        &mixed_frame(),
+        Requirements {
+            temporaries: 3,
+            ..Requirements::default()
+        },
+    );
 
     assert_eq!(first.size(), second.size());
     for entry in mixed_frame().slots {
@@ -162,7 +204,13 @@ fn layout_is_deterministic() {
 /// A frame small enough for the pre-indexed form opens with the two documented instructions.
 #[test]
 fn a_small_frame_opens_with_the_pre_indexed_form() {
-    let layout = FrameLayout::build(&mixed_frame(), 2);
+    let layout = FrameLayout::build(
+        &mixed_frame(),
+        Requirements {
+            temporaries: 2,
+            ..Requirements::default()
+        },
+    );
     let mut emitter = Emitter::new();
     layout.emit_prologue(&mut emitter, &[]);
 
@@ -185,7 +233,13 @@ fn a_large_frame_lowers_the_stack_pointer_separately() {
     let frame = Frame {
         slots: vec![slot(0, "big", 40_000, 4, SymbolKind::Local)],
     };
-    let layout = FrameLayout::build(&frame, 0);
+    let layout = FrameLayout::build(
+        &frame,
+        Requirements {
+            temporaries: 0,
+            ..Requirements::default()
+        },
+    );
     let mut emitter = Emitter::new();
     layout.emit_prologue(&mut emitter, &[]);
 
@@ -193,7 +247,7 @@ fn a_large_frame_lowers_the_stack_pointer_separately() {
 
     assert!(assembly.contains("sub sp, sp, x9"), "got: {assembly}");
     assert!(
-        assembly.contains("\tstp x29, x30, [sp]\n\tmov x29, sp\n"),
+        assembly.contains("\tstp x29, x30, [sp, #0]\n\tadd x29, sp, #0\n"),
         "got: {assembly}"
     );
     assert!(
@@ -206,7 +260,13 @@ fn a_large_frame_lowers_the_stack_pointer_separately() {
 #[test]
 fn parameters_are_spilled_into_their_slots() {
     let frame = mixed_frame();
-    let layout = FrameLayout::build(&frame, 0);
+    let layout = FrameLayout::build(
+        &frame,
+        Requirements {
+            temporaries: 0,
+            ..Requirements::default()
+        },
+    );
     let mut emitter = Emitter::new();
     layout.emit_prologue(&mut emitter, &frame.slots);
 
@@ -228,7 +288,13 @@ fn parameters_are_spilled_into_their_slots() {
 #[test]
 fn locals_are_not_spilled_in_the_prologue() {
     let frame = mixed_frame();
-    let layout = FrameLayout::build(&frame, 0);
+    let layout = FrameLayout::build(
+        &frame,
+        Requirements {
+            temporaries: 0,
+            ..Requirements::default()
+        },
+    );
     let mut emitter = Emitter::new();
     layout.emit_prologue(&mut emitter, &frame.slots);
 
@@ -244,7 +310,13 @@ fn locals_are_not_spilled_in_the_prologue() {
 /// The epilogue undoes the prologue and returns, in the form that matches the frame's size.
 #[test]
 fn the_epilogue_mirrors_the_prologue() {
-    let small = FrameLayout::build(&mixed_frame(), 0);
+    let small = FrameLayout::build(
+        &mixed_frame(),
+        Requirements {
+            temporaries: 0,
+            ..Requirements::default()
+        },
+    );
     let mut emitter = Emitter::new();
     small.emit_epilogue(&mut emitter);
     let assembly = emitter.finish();
@@ -260,13 +332,19 @@ fn the_epilogue_mirrors_the_prologue() {
     let frame = Frame {
         slots: vec![slot(0, "big", 40_000, 4, SymbolKind::Local)],
     };
-    let large = FrameLayout::build(&frame, 0);
+    let large = FrameLayout::build(
+        &frame,
+        Requirements {
+            temporaries: 0,
+            ..Requirements::default()
+        },
+    );
     let mut emitter = Emitter::new();
     large.emit_epilogue(&mut emitter);
     let assembly = emitter.finish();
 
     assert!(
-        assembly.contains("\tmov sp, x29\n\tldp x29, x30, [sp]\n"),
+        assembly.contains("\tldp x29, x30, [sp, #0]\n"),
         "got: {assembly}"
     );
     assert!(assembly.contains("add sp, sp, x9"), "got: {assembly}");
@@ -322,4 +400,73 @@ fn temporaries_are_counted_by_depth_not_by_quantity() {
 
         assert_eq!(temporaries_needed(&body), expected, "{shape}");
     }
+}
+
+/// A function that passes arguments on the stack reserves room for them at the bottom of its frame.
+///
+/// `x29` then sits above that room rather than at the very bottom, so a named slot's offset is
+/// unchanged and the outgoing area cannot be written over by anything the body does.
+#[test]
+fn an_outgoing_argument_area_sits_below_the_saved_registers() {
+    let needs = Requirements {
+        temporaries: 1,
+        arguments: 9,
+        call_depth: 1,
+        outgoing: 16,
+    };
+    let layout = FrameLayout::build(&mixed_frame(), needs);
+
+    assert_eq!(layout.outgoing(), 16);
+    assert_eq!(layout.size() % 16, 0);
+
+    for entry in mixed_frame().slots {
+        let offset = layout
+            .offset_of(entry.slot)
+            .unwrap_or_else(|| panic!("{} has no offset", entry.name));
+
+        assert!(
+            offset >= SAVED_REGISTERS,
+            "{} would overlap the saved registers",
+            entry.name
+        );
+    }
+
+    let mut emitter = Emitter::new();
+    layout.emit_prologue(&mut emitter, &[]);
+    let assembly = emitter.finish();
+
+    assert!(
+        assembly.contains("\tstp x29, x30, [sp, #16]\n\tadd x29, sp, #16\n"),
+        "got: {assembly}"
+    );
+}
+
+/// Argument slots are distinct across positions and across levels of call nesting.
+#[test]
+fn argument_slots_are_distinct_across_calls_and_positions() {
+    let needs = Requirements {
+        temporaries: 2,
+        arguments: 3,
+        call_depth: 2,
+        outgoing: 0,
+    };
+    let layout = FrameLayout::build(&mixed_frame(), needs);
+
+    let mut seen = Vec::new();
+    for depth in 0..2 {
+        for index in 0..3 {
+            seen.push(
+                layout
+                    .argument(depth, index)
+                    .unwrap_or_else(|| panic!("call {depth} argument {index} has no slot")),
+            );
+        }
+    }
+
+    let count = seen.len();
+    seen.sort_unstable();
+    seen.dedup();
+
+    assert_eq!(seen.len(), count, "two argument slots share an offset");
+    assert_eq!(layout.argument(2, 0), None, "there is no third call depth");
 }

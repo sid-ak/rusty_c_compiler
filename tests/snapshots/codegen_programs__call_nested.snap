@@ -1,0 +1,62 @@
+---
+source: tests/codegen_programs.rs
+expression: "int g(int n) { return n; }\nint f(int a, int b) { return a - b; }\nint answer(void) { return f(g(5), g(2)); }"
+---
+	.section	__TEXT,__text,regular,pure_instructions
+	.globl	_g
+	.p2align	2
+_g:
+	stp x29, x30, [sp, #-32]!
+	mov x29, sp
+	str w0, [x29, #16]
+	add x0, x29, #16
+	ldr w0, [x0]
+	b Lg_return_0
+Lg_return_0:
+	mov sp, x29
+	ldp x29, x30, [sp], #32
+	ret
+	.globl	_f
+	.p2align	2
+_f:
+	stp x29, x30, [sp, #-48]!
+	mov x29, sp
+	str w0, [x29, #16]
+	str w1, [x29, #20]
+	add x0, x29, #16
+	ldr w0, [x0]
+	str w0, [x29, #24]
+	add x0, x29, #20
+	ldr w0, [x0]
+	mov w1, w0
+	ldr w0, [x29, #24]
+	sub w0, w0, w1
+	b Lf_return_1
+Lf_return_1:
+	mov sp, x29
+	ldp x29, x30, [sp], #48
+	ret
+	.globl	_answer
+	.p2align	2
+_answer:
+	stp x29, x30, [sp, #-80]!
+	mov x29, sp
+	movz w0, #5
+	str x0, [x29, #56]
+	ldr x0, [x29, #56]
+	bl _g
+	str x0, [x29, #40]
+	movz w0, #2
+	str x0, [x29, #56]
+	ldr x0, [x29, #56]
+	bl _g
+	str x0, [x29, #48]
+	ldr x0, [x29, #40]
+	ldr x1, [x29, #48]
+	bl _f
+	b Lanswer_return_2
+Lanswer_return_2:
+	mov sp, x29
+	ldp x29, x30, [sp], #80
+	ret
+.subsections_via_symbols

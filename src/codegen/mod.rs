@@ -18,7 +18,7 @@ pub mod frame;
 
 use crate::ast::{Block, Expr, ForInit, FuncDef, Item, Program, Stmt, StmtKind};
 use crate::codegen::emit::{Emitter, Width};
-use crate::codegen::frame::{temporaries_needed, FrameLayout};
+use crate::codegen::frame::{requirements, FrameLayout, Requirements};
 use crate::diagnostics::{Diagnostic, DiagnosticKind, Span};
 use crate::sema::annotations::Annotations;
 
@@ -75,6 +75,8 @@ pub(crate) struct Generator<'a> {
     pub(crate) epilogue: String,
     /// The enclosing loops, innermost last, giving `break` and `continue` somewhere to go.
     pub(crate) loops: Vec<LoopLabels>,
+    /// How many calls enclose the expression being lowered, which picks its argument slots.
+    pub(crate) call_depth: u32,
     /// Gaps in the generator found while walking.
     pub(crate) diagnostics: Vec<Diagnostic>,
 }
@@ -85,10 +87,14 @@ impl<'a> Generator<'a> {
         Self {
             emitter: Emitter::new(),
             annotations,
-            layout: FrameLayout::build(&crate::sema::annotations::Frame::default(), 0),
+            layout: FrameLayout::build(
+                &crate::sema::annotations::Frame::default(),
+                Requirements::default(),
+            ),
             depth: 0,
             epilogue: String::new(),
             loops: Vec::new(),
+            call_depth: 0,
             diagnostics: Vec::new(),
         }
     }
@@ -120,8 +126,9 @@ impl<'a> Generator<'a> {
         };
         let frame = frame.clone();
 
-        self.layout = FrameLayout::build(&frame, temporaries_needed(&def.body));
+        self.layout = FrameLayout::build(&frame, requirements(&def.body));
         self.depth = 0;
+        self.call_depth = 0;
         self.epilogue = self.emitter.new_label(&format!("{name}_return"));
 
         self.emitter.begin_function(name);

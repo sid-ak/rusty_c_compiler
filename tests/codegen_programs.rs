@@ -597,6 +597,180 @@ fn main_without_a_return_exits_zero() {
     assert_eq!(run.status.code(), Some(0));
 }
 
+/// Arguments arrive with the right values, at every arity including past the register boundary.
+///
+/// Nine is the case that matters: the first eight travel in registers and the ninth on the stack,
+/// so it is the first arity where the caller and the callee have to agree about memory.
+#[test]
+fn arguments_arrive_at_every_arity() {
+    let cases = [
+        ("zero", "int f(void) { return 7; }\nint answer(void) { return f(); }", "7"),
+        ("one", "int f(int a) { return a; }\nint answer(void) { return f(3); }", "3"),
+        ("two, asymmetric", "int f(int a, int b) { return a - b; }\nint answer(void) { return f(10, 3); }", "7"),
+        (
+            "three, each distinguishable",
+            "int f(int a, int b, int c) { return a * 100 + b * 10 + c; }\nint answer(void) { return f(1, 2, 3); }",
+            "123",
+        ),
+        (
+            "eight, the last register argument",
+            "int f(int a,int b,int c,int d,int e,int g,int h,int i) { return i; }\nint answer(void) { return f(1,2,3,4,5,6,7,8); }",
+            "8",
+        ),
+        (
+            "nine, the first stack argument",
+            "int f(int a,int b,int c,int d,int e,int g,int h,int i,int j) { return j; }\nint answer(void) { return f(1,2,3,4,5,6,7,8,9); }",
+            "9",
+        ),
+        (
+            "nine, every argument summed",
+            "int f(int a,int b,int c,int d,int e,int g,int h,int i,int j) { return a+b+c+d+e+g+h+i+j; }\nint answer(void) { return f(1,2,3,4,5,6,7,8,9); }",
+            "45",
+        ),
+        (
+            "nine, weighted so a transposition shows",
+            "int f(int a,int b,int c,int d,int e,int g,int h,int i,int j) { return a*1+b*2+c*4+d*8+e*16+g*32+h*64+i*128+j*256; }\nint answer(void) { return f(1,1,1,1,1,1,1,1,1); }",
+            "511",
+        ),
+    ];
+
+    for (shape, source, expected) in cases {
+        assert_eq!(answer_of(&slug(shape), source), expected, "{shape}");
+    }
+}
+
+/// An argument that is itself a call does not clobber an argument already evaluated.
+///
+/// Proved through the returned value rather than through observable order: C leaves the order in
+/// which arguments are evaluated unspecified, so a test that watched for side effects could fail
+/// on a disagreement that is not a bug.
+#[test]
+fn nested_calls_do_not_clobber_placed_arguments() {
+    let source = "\
+int g(int n) { return n * 10; }
+int h(int n) { return n + 1; }
+int f(int a, int b) { return a - b; }
+int answer(void) { return f(g(5), h(2)); }
+";
+
+    assert_eq!(answer_of("nested-calls", source), "47");
+}
+
+/// Nested calls survive at the stack-argument boundary too.
+#[test]
+fn nested_calls_survive_nine_arguments() {
+    let source = "\
+int one(int n) { return n; }
+int nine(int a,int b,int c,int d,int e,int g,int h,int i,int j) { return a*1+b*2+c*4+d*8+e*16+g*32+h*64+i*128+j*256; }
+int answer(void) { return nine(one(1),one(1),one(1),one(1),one(1),one(1),one(1),one(1),one(1)); }
+";
+
+    assert_eq!(answer_of("nested-nine", source), "511");
+}
+
+/// Recursion works, at the shapes that exercise it hardest.
+#[test]
+fn recursion_computes_what_it_should() {
+    let cases = [
+        (
+            "factorial",
+            "int fact(int n) { if (n <= 1) { return 1; } return n * fact(n - 1); }\nint answer(void) { return fact(10); }",
+            "3628800",
+        ),
+        (
+            "fibonacci",
+            "int fib(int n) { if (n < 2) { return n; } return fib(n - 1) + fib(n - 2); }\nint answer(void) { return fib(20); }",
+            "6765",
+        ),
+        (
+            "ackermann at a small bound",
+            "int ack(int m, int n) { if (m == 0) { return n + 1; } if (n == 0) { return ack(m - 1, 1); } return ack(m - 1, ack(m, n - 1)); }\nint answer(void) { return ack(2, 3); }",
+            "9",
+        ),
+    ];
+
+    for (shape, source, expected) in cases {
+        assert_eq!(answer_of(&slug(shape), source), expected, "{shape}");
+    }
+}
+
+/// Two functions that call each other resolve and terminate.
+#[test]
+fn mutual_recursion_works() {
+    let source = "\
+int is_odd(int n);
+int is_even(int n) { if (n == 0) { return 1; } return is_odd(n - 1); }
+int is_odd(int n) { if (n == 0) { return 0; } return is_even(n - 1); }
+int answer(void) { return is_even(10) * 10 + is_odd(7); }
+";
+
+    assert_eq!(answer_of("mutual-recursion", source), "11");
+}
+
+/// A call to a function declared first and defined later resolves.
+#[test]
+fn a_forward_declared_call_resolves() {
+    let source = "\
+int later(int n);
+int answer(void) { return later(6); }
+int later(int n) { return n * 7; }
+";
+
+    assert_eq!(answer_of("forward-declared", source), "42");
+}
+
+/// A `void` function is called for its effect and returns nothing.
+#[test]
+fn a_void_function_is_called_as_a_statement() {
+    let source = "\
+void put(int values[], int index, int value) { values[index] = value; }
+int answer(void) {
+    int store[2];
+    put(store, 0, 30);
+    put(store, 1, 12);
+    return store[0] + store[1];
+}
+";
+
+    assert_eq!(answer_of("void-call", source), "42");
+}
+
+/// An array passed to a function is mutated in place and the caller sees the change.
+///
+/// This is the decay ADR 0007 permits, working end to end: the callee receives an address, not a
+/// copy, so what it writes is what the caller reads back.
+#[test]
+fn an_array_is_mutated_through_a_call() {
+    let source = "\
+void fill(int values[], int count, int value) {
+    for (int i = 0; i < count; i = i + 1) { values[i] = value + i; }
+}
+int total(int values[], int count) {
+    int sum = 0;
+    for (int i = 0; i < count; i = i + 1) { sum = sum + values[i]; }
+    return sum;
+}
+int answer(void) {
+    int numbers[4];
+    fill(numbers, 4, 10);
+    return total(numbers, 4);
+}
+";
+
+    assert_eq!(answer_of("array-through-a-call", source), "46");
+}
+
+/// A `char` argument is promoted before the call and arrives as the value C says it has.
+#[test]
+fn char_arguments_are_promoted() {
+    let source = "\
+int take(int n) { return n; }
+int answer(void) { char c = 200; return take(c); }
+";
+
+    assert_eq!(answer_of("char-argument", source), "-56");
+}
+
 /// Assembles `assembly` with `clang -c -Werror`, failing on anything at all on stderr.
 fn assembles_cleanly(name: &str, assembly: &str) {
     let directory = scratch(name);
@@ -663,6 +837,14 @@ const CONSTRUCTS: &[(&str, &str)] = &[
     ("for_empty_clauses", "int answer(void) { int t = 0; for (;;) { t = 1; break; } return t; }"),
     ("for_continue", "int answer(void) { int t = 0; for (int i = 0; i < 3; i = i + 1) { continue; } return t; }"),
     ("implicit_main_return", "int main(void) { int x; x = 5; }"),
+    ("call_no_arguments", "int f(void) { return 1; }\nint answer(void) { return f(); }"),
+    ("call_two_arguments", "int f(int a, int b) { return a - b; }\nint answer(void) { return f(10, 3); }"),
+    (
+        "call_nine_arguments",
+        "int f(int a,int b,int c,int d,int e,int g,int h,int i,int j) { return j; }\nint answer(void) { return f(1,2,3,4,5,6,7,8,9); }",
+    ),
+    ("call_nested", "int g(int n) { return n; }\nint f(int a, int b) { return a - b; }\nint answer(void) { return f(g(5), g(2)); }"),
+    ("call_recursive", "int f(int n) { if (n <= 1) { return 1; } return n * f(n - 1); }\nint answer(void) { return f(5); }"),
 ];
 
 /// The emitted assembly for each construct, pinned so a regression is a readable diff.

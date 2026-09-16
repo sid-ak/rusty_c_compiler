@@ -1,0 +1,28 @@
+---
+source: tests/codegen_programs.rs
+expression: "int f(void) { return 1; }\nint answer(void) { return f(); }"
+---
+	.section	__TEXT,__text,regular,pure_instructions
+	.globl	_f
+	.p2align	2
+_f:
+	stp x29, x30, [sp, #-32]!
+	mov x29, sp
+	movz w0, #1
+	b Lf_return_0
+Lf_return_0:
+	mov sp, x29
+	ldp x29, x30, [sp], #32
+	ret
+	.globl	_answer
+	.p2align	2
+_answer:
+	stp x29, x30, [sp, #-32]!
+	mov x29, sp
+	bl _f
+	b Lanswer_return_1
+Lanswer_return_1:
+	mov sp, x29
+	ldp x29, x30, [sp], #32
+	ret
+.subsections_via_symbols
