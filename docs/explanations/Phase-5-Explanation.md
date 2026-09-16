@@ -12,11 +12,8 @@ answer was.
 - [What Was](#what-was)
 - [Overview](#overview)
 - [Components](#components)
-    - [The Oracle Problem](#the-oracle-problem)
     - [The Harness](#the-harness)
-    - [Testing The Test Harness](#testing-the-test-harness)
-    - [Growing The Corpus](#growing-the-corpus)
-    - [The Bug The Corpus Found](#the-bug-the-corpus-found)
+    - [The Corpus](#the-corpus)
     - [The Program Generator](#the-program-generator)
     - [Fuzzing](#fuzzing)
     - [Acceptance](#acceptance)
@@ -77,10 +74,6 @@ Four pieces make that work, and this phase built all four:
 - Fuzzing, which asks a different question entirely: not "is the answer right" but "does the
   compiler survive input that is not a program at all".
 
-## Components
-
-### The Oracle Problem
-
 Testing anything requires knowing the right answer. For most software that means a person writing it
 down; for a compiler it is worse than usual, because the right answer is not a value but a *program's
 behavior*, and working it out by hand means being a compiler.
@@ -106,23 +99,29 @@ ways that looked perfectly innocent:
   has not been given a value yet.
 - A loop that never terminates and does nothing is undefined in its own right.
 
-`clang` found every one of them, because it warns about exactly these. So the corpus test does not
-merely check that `clang` compiles each program — it checks what `clang` *says* about each program,
-and requires the program to declare any warning it deliberately provokes:
+The part of the [architecture](../architecture.md#testing-architecture) this phase builds is
+outlined in red. It is the only phase whose work sits beside the pipeline rather than inside it:
+nothing here changes what the compiler does, and everything here is about finding out whether what
+it does is right.
 
-```c
-// clang-warns: -Wlogical-op-parentheses
-```
+![Phase 5 in the architecture: the testing tiers](../assets/phase-5.svg)
 
-`arithmetic.c` writes `a > b || a > b && a < b` without parentheses on purpose: that is the
-precedence rule being tested, and adding the parentheses `-Wall` asks for would delete the test.
-Declaring the warning keeps the program honest and keeps a *new* warning — the kind that means
-something is actually wrong — from arriving unnoticed among the ones that were expected.
+## Components
+
+| Component | New or extended | Role |
+|---|---|---|
+| [The Harness](#the-harness) | New | Building both compilers' output, running it, and comparing |
+| [The Corpus](#the-corpus) | Extends Phase 4's golden programs | Sixty-four programs wide enough that agreement means something |
+| [The Program Generator](#the-program-generator) | New | Programs nobody chose, with a right answer by construction |
+| [Fuzzing](#fuzzing) | New | Input that is not a program at all |
+| [Acceptance](#acceptance) | New | The record of the run the proposal asked for |
 
 ### The Harness
 
-`tests/harness/` is the shared plumbing and `tests/differential.rs` is the suite built on it. The
-interesting decisions are about failure rather than success.
+The shared plumbing, and the suite built on it. The interesting decisions are all about failure
+rather than success.
+
+#### One Test Per Program (`build.rs`, `tests/differential.rs`)
 
 One test per program. Rust needs its test functions to exist at compile time, so a corpus
 discovered from a directory cannot simply become a list of tests. The list is generated instead:
@@ -131,10 +130,14 @@ differential suite and the golden suite expand that macro into one `#[test]` eac
 a list, so nobody can forget to add to it — which was the one way a program could be added to the
 corpus and silently never run.
 
+#### Comparing, Apart From Running (`tests/harness/mod.rs`)
+
 Comparing is separate from running. The comparison is a plain function over two records of a
 run — what each printed, what each wrote to standard error, how each ended — with no compiler and no
 process behind it. That split exists entirely so the harness can be handed a wrong answer on
 purpose, which is the next section.
+
+#### Three Outcomes, Not Two (`tests/harness/mod.rs`)
 
 Three outcomes, not two. A naive harness has "passed" and "failed". This one distinguishes:
 
@@ -147,17 +150,21 @@ Three outcomes, not two. A naive harness has "passed" and "failed". This one dis
   programs that both ran forever almost always differ on their output too. The first version of the
   harness reported that as "stdout differs", which was true and completely misleading.
 
+#### Output Goes To Files (`tests/harness/mod.rs`)
+
 Output goes to files, not pipes. A pipe has a fixed-size buffer. When it fills, the program
 writing to it stops until somebody reads — and a parent process that is waiting for the program to
 finish before it reads will wait forever. That turns a chatty test program into a hang that looks
 exactly like a compiler emitting a broken loop. Writing to a file has no buffer to fill.
+
+#### A Failure Names A Directory (`tests/harness/mod.rs`)
 
 A failure names a directory. The message carries the program, the disagreement, and the path to a
 directory holding both binaries, both captures of their output, and the assembly `rustycc` produced.
 A failure that can only be investigated by first reproducing it is most of the way to no report at
 all.
 
-### Testing The Test Harness
+#### Breaking It On Purpose (`tests/harness_self_tests.rs`, `tests/harness/fixtures/`)
 
 The differential suite is the project's definition of done, which makes it the one piece of test
 code whose passing is taken as evidence about everything else. Test code that cannot fail proves
@@ -182,7 +189,9 @@ So `tests/harness_self_tests.rs` breaks it on purpose, one way at a time:
 - A program `rustycc` rejects and a file that is not C at all, each reported against the right
   compiler.
 
-### Growing The Corpus
+### The Corpus
+
+#### Sixty-Four Programs (`tests/programs/`)
 
 Seven programs became sixty-four. The target was not the number; it was two properties:
 
@@ -197,7 +206,24 @@ Seven programs became sixty-four. The target was not the number; it was two prop
 suite — on the grounds that a program nobody wrote down the purpose of has stopped being coverage
 and become a file.
 
-Two habits run through the programs themselves:
+#### Declared Warnings (`tests/programs/`, `tests/differential.rs`)
+
+`clang` found every one of them, because it warns about exactly these. So the corpus test does not
+merely check that `clang` compiles each program — it checks what `clang` *says* about each program,
+and requires the program to declare any warning it deliberately provokes:
+
+```c
+// clang-warns: -Wlogical-op-parentheses
+```
+
+`arithmetic.c` writes `a > b || a > b && a < b` without parentheses on purpose: that is the
+precedence rule being tested, and adding the parentheses `-Wall` asks for would delete the test.
+Declaring the warning keeps the program honest and keeps a *new* warning — the kind that means
+something is actually wrong — from arriving unnoticed among the ones that were expected.
+
+#### How The Programs Are Written (`tests/programs/`)
+
+Two habits run through the programs themselves.
 
 A wrong answer should be a different answer. `2 - 2` is `0` whichever way round a subtraction
 reads its operands, so a compiler that has them backwards passes it. Every non-commutative operator
@@ -209,44 +235,9 @@ factorial, primality — each appears as a loop and as a recursion, and the two 
 each other across a whole range of inputs rather than each against one recorded value. Two different
 pieces of code reaching the same answer is a stronger statement than one piece agreeing with itself.
 
-### The Bug The Corpus Found
-
-Writing the programs found a real defect within the first hour, in a construct that had been
-working — apparently — since Phase 4.
-
-C says that when an array is initialized with fewer values than it has elements, the rest are zero:
-
-```c
-int a[4] = {5};   /* a[1], a[2] and a[3] are 0 */
-```
-
-For a global, that falls out of how globals are stored: they live in a region of the executable
-that starts out zero, so writing `5` into the first slot is the whole job. For a local, the
-storage is a piece of the function's stack frame — memory that was last used by whatever function
-ran before this one, holding whatever that function left in it. The zeros have to be written, or
-they are not there.
-
-The compiler wrote only the values it had been given. So `array_initializers.c` printed:
-
-```
-7-1704277921 ...
-```
-
-where `clang` printed `700`.
-
-Three things about this are worth more than the fix:
-
-- Every existing test passed. Every one of them read back an element the initializer had
-  actually mentioned. The bug lived entirely in the elements nobody had thought to look at.
-- The comment was already right. The code path that copies a string literal into a `char` array
-  did zero its tail, and its comment said it was doing "the same as a short brace list" — which the
-  short brace list was not doing. Both now call one helper, so the two cannot disagree again.
-- The first test written for the fix passed against the broken compiler. It summed all four
-  elements, and the stack leftovers in that particular frame happened to cancel to zero. An
-  aggregate — a sum, a count, a "contains" — cannot detect an omission it happens to balance. The
-  test that stuck checks the untouched elements individually.
-
 ### The Program Generator
+
+#### Programs With A Right Answer (`tests/generator/mod.rs`)
 
 A hand-written corpus plateaus. Every program in it was written by someone who already had a theory
 about what might be broken, so it finds the bugs that fit a theory and then stops finding anything.
@@ -278,6 +269,8 @@ That is a chain of reasoning, and chains of reasoning are wrong sometimes. So a 
 generated programs is also compiled with `clang -fsanitize=undefined`, which instruments the program
 to complain at runtime if it does any of these things. Finding nothing is the check on the reasoning
 being right rather than only careful.
+
+#### Bounds Found The Hard Way (`tests/generator/mod.rs`)
 
 Four bounds in the generator exist because their absence was found the hard way.
 
@@ -314,10 +307,14 @@ Now only the top level of `main` prints; everything computed inside a loop or a 
 single global, which `main` prints at the end. The fold is order-sensitive, so a wrong value anywhere
 still changes it.
 
+#### Seeds (`tests/generated.rs`)
+
 Everything is seeded: the same seed produces byte-identical source, and a failure prints its seed.
 That turns a failure from a story about a run that has already finished into a file.
 
 ### Fuzzing
+
+#### What It Asks (`fuzz/fuzz_targets/`)
 
 Everything above asks whether the compiler produces the right answer for a program. Fuzzing asks
 something else: what happens when the input is not a program.
@@ -343,11 +340,15 @@ panics is blind to a pass that returns something nonsensical without crashing. T
 end in an end-of-file token and every span must point inside the input. A tree must dump. A program
 must be either accepted or reported on, never neither.
 
+#### The Depth Limits It Would Otherwise Find (`src/parser/mod.rs`, `src/sema/mod.rs`)
+
 The failure mode fuzzing finds in a recursive-descent parser is not usually a wrong tree — it is a
 stack overflow. Ten thousand nested parentheses cost ten thousand nested function calls, and a
 stack is finite. That was anticipated rather than discovered: the parser carries a depth limit that
 turns deep nesting into an ordinary diagnostic, and semantic analysis carries its own, because it
 walks the same tree a second time.
+
+#### Seeding And Regressions (`scripts/fuzz.sh`, `fuzz/regressions/`)
 
 The seed corpus is not checked in. `scripts/fuzz.sh` builds it from what the repository already has
 — the valid programs, the invalid ones, the adversarial inputs Phase 2 collected, and any past
@@ -360,6 +361,8 @@ ordinary test suite runs it on every change from then on.
 
 ### Acceptance
 
+#### The Record (`docs/reports/acceptance.md`)
+
 The project's stated definition of done, written before any of it was built, is one run: every
 program in the curated suite, covering every supported feature, behaving identically under `rustycc`
 and under `clang -O0`, with no known mismatches.
@@ -370,34 +373,42 @@ rather than a memory.
 
 ## Learnings
 
-A test that cannot fail is not a test. This applies most sharply to the thing everything else is
-measured against. The comparison function was split out from the running specifically so a wrong
-answer could be handed to it, and the first three self-tests written that way each found a real gap
-in what it checked.
-
-An aggregate assertion cannot detect an omission. A sum, a count, a "contains" — each can be
-satisfied by the wrong values as easily as the right ones. The first test for the zero-fill bug
-summed four array elements and passed against the broken compiler because the leftovers cancelled.
-Assert over each case, not over a fold of them.
-
-Two compilers agreeing about an undefined program proves nothing. This is the one constraint
-that shapes the whole phase: the corpus, the generator's interval arithmetic, and the decision to
-check what `clang` warns about rather than only whether it succeeds. An oracle is only an oracle
-where an answer exists.
-
-Reason about cost the way you reason about values. The generator's interval arithmetic made its
-programs *correct*; nothing made them *finish*. Both are properties of a generated program that a
-test depends on, and only one of them had been thought about — which is why three programs in two
-and a half thousand were useless as tests and looked like compiler bugs.
-
-Say which thing went wrong, not that something did. A mismatch, a program one compiler would not
-build, and a program that never finished are three different situations with three different next
-steps. The first version of the harness collapsed the third into the first, and the resulting message
-was true, unhelpful, and actively misleading about where to look.
-
-Generating a list beats maintaining one. The corpus listing comes out of `build.rs` reading the
-directory. There is no list to forget to add to, which removes a failure mode rather than testing
-for it.
+1. A corpus found a real defect in its first hour, in a construct that had been working —
+   apparently — since Phase 4. C says an array initialized with fewer values than it has elements
+   has the rest set to zero. For a global that falls out of where globals live, a region that starts
+   out zero; for a local the storage is a piece of a stack frame holding whatever the last function
+   left there, so the zeroes have to be written. The compiler wrote only the values it had been
+   given, and `array_initializers.c` printed `7-1704277921 ...` where `clang` printed `700`. Three
+   things about it are worth more than the fix:
+    - Every existing test passed, because every one of them read back an element the initializer had
+      actually mentioned. The bug lived entirely in the elements nobody thought to look at.
+    - The comment was already right. The path that copies a string literal into a `char` array did
+      zero its tail, and said it was doing "the same as a short brace list" — which the short brace
+      list was not doing. Both now call one helper.
+    - The first test written for the fix passed against the broken compiler. It summed all four
+      elements and the stack leftovers happened to cancel to zero.
+2. An aggregate assertion cannot detect an omission. A sum, a count, a "contains" — each is
+   satisfied by the wrong values as readily as the right ones, which is how the test above passed.
+   Assert over each case rather than over a fold of them.
+3. A test that cannot fail is not a test, and it matters most for the thing everything else is
+   measured against. The comparison was split out from the running specifically so a wrong answer
+   could be handed to it, and the first three self-tests written that way each found a real gap in
+   what it checked.
+4. Two compilers agreeing about an undefined program proves nothing. This is the one constraint that
+   shapes the whole phase: the corpus, the generator's interval arithmetic, and the decision to check
+   what `clang` warns about rather than only whether it succeeded. An oracle is only an oracle where
+   an answer exists.
+5. Reason about cost the way you reason about values. The generator's interval arithmetic made its
+   programs correct; nothing made them finish. Both are properties a test depends on, and only one
+   had been thought about — which is why three programs in two and a half thousand were useless as
+   tests and looked like compiler bugs.
+6. Say which thing went wrong, not that something did. A mismatch, a program one compiler would not
+   build, and a program that never finished are three situations with three different next steps.
+   The first version of the harness collapsed the third into the first, and the message was true,
+   unhelpful, and actively misleading about where to look.
+7. Generating a list beats maintaining one. The corpus listing comes out of `build.rs` reading the
+   directory, so there is no list to forget to add to — a failure mode removed rather than tested
+   for.
 
 ## Try It Out
 
