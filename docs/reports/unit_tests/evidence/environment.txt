@@ -1,0 +1,60 @@
+Captured 2026-09-16 07:33:37 UTC
+
+$ sw_vers
+=====================================================================
+ProductName:		macOS
+ProductVersion:		26.6.2
+BuildVersion:		25G83
+
+$ uname -m
+=====================================================================
+arm64
+
+$ xcode-select -p
+=====================================================================
+/Applications/Xcode.app/Contents/Developer
+
+$ clang --version
+=====================================================================
+Apple clang version 17.0.0 (clang-1700.4.4.1)
+Target: arm64-apple-darwin25.6.0
+Thread model: posix
+InstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin
+
+$ rustc --version
+=====================================================================
+rustc 1.97.1 (8bab26f4f 2026-07-14)
+
+$ cargo --version
+=====================================================================
+cargo 1.97.1 (c980f4866 2026-06-30)
+
+$ rustup show active-toolchain
+=====================================================================
+1.97.1-aarch64-apple-darwin (overridden by '/Users/sidharthanandkumar/repos/rusty_c_compiler/rust-toolchain.toml')
+
+$ git --version
+=====================================================================
+git version 2.50.1 (Apple Git-155)
+
+$ git rev-parse HEAD
+=====================================================================
+3eee119a3d43a6ad833f8c96d72661ab3d1d2738
+
+$ cargo insta --version
+=====================================================================
+error: no such command: `insta`
+
+help: a command with a similar name exists: `init`
+
+help: view all installed commands with `cargo --list`
+help: find a package to install `insta` with `cargo search cargo-insta`
+(exited 101)
+
+$ cargo fuzz --version
+=====================================================================
+cargo-fuzz 0.13.2
+
+$ uv --version
+=====================================================================
+uv 0.11.24 (5e04460c0 2026-06-23 aarch64-apple-darwin)

@@ -71,6 +71,13 @@ echo "==> checking the phase diagrams are current"
 # without regenerating them would leave the phase explanations showing an older architecture.
 python3 scripts/phase_diagrams.py --check
 
+echo "==> checking the unit test reports list every test"
+# The table of tests in each report is generated from the tests' own doc comments. This fails the
+# build if a table is out of date, if two reports claim the same file of tests, or if a file of
+# tests exists that no report claims — the last being a unit with no report, which is the omission
+# an index of reports cannot otherwise notice.
+python3 scripts/test_inventory.py --check
+
 echo "==> building the prose site"
 # --strict catches a broken internal link or a page missing from the nav. Because the API reference
 # is staged above, docs/api.md's link to it is checked here too rather than being taken on trust.

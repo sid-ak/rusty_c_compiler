@@ -15,7 +15,7 @@ seam — argument parsing correctness, the file-I/O boundary, and the binary's p
 
 ## Date
 
-2026-08-23
+2026-09-16
 
 ## Engineers
 
@@ -95,78 +95,63 @@ invokes from a shell.**
 agreement. Both outcome branches of `run()` (successful compile-and-print, and each `Error` variant)
 are covered, including their `Display` output at a pluralization boundary. The binary's process-level
 behavior (exit code, stderr content, the no-panic guarantee) is covered by real subprocess execution,
-not simulated. What is out of scope here: this unit does not test `compile()`'s behavior for stages
-past `Ast` (semantic analysis, code generation, or assembling/linking to a real executable), because
-those stages do not exist in the compiler yet — `compile()`'s current implementation falls through to
-`Ok(Artifacts::default())` for any stage past `Ast`, which is exercised incidentally by
-`parses_the_documented_invocation`/`default_stage_is_an_executable` selecting `Stage::Executable`,
-but there is intentionally no test asserting executable-producing behavior, since none exists to
-test yet; this will need new tests once Phases 3–4 land.
+not simulated. Every stage a flag can select is driven end to end, including the default one:
+`compiling_and_running_a_program_works_end_to_end` compiles a program, links it, runs it, and checks
+what it printed, which is the contract the original proposal states in one sentence.
+
+The driver's own half is covered by what it leaves behind rather than by what it produces. Its
+intermediates are removed however the run ends — including when the link fails, which is the path
+nobody remembers to tidy by hand — and kept when the caller asks for them. Two compilations running
+at once are checked not to write over each other, because a fixed temporary path is the kind of
+mistake that passes every test run one at a time.
+
+What is out of scope here: whether the program the driver produced computes the right answer. That
+is the code generation units' question, and ultimately the differential suite's.
 
 ## Automated Test Code
 
-15 tests total: 8 in `src/cli.rs`, 4 in `src/lib.rs`, 3 in `tests/cli.rs` (`src/main.rs` itself has
+The tests live in `src/cli/tests.rs`, `src/driver/tests.rs`, and `src/tests.rs` — the modules' own
+test files — with the black-box suite in `tests/cli.rs`. (`src/main.rs` itself has
 no `#[cfg(test)]` module — by design, per its own doc comment, "everything else lives in the
 library so integration tests can drive the compiler in process").
 
-### `src/cli.rs` (8 tests)
-
-| # | Test | Input | Expected output |
-|---|------|-------|------------------|
-| 1 | `command_definition_is_valid` | `Options::command().debug_assert()` | No panic (clap's own structural check passes) |
-| 2 | `parses_the_documented_invocation` | argv `["program.c", "-o", "program"]` | `.input=="program.c"`, `.output==Some("program")`, `.stage()==Executable` |
-| 3 | `default_stage_is_an_executable` | argv `["program.c"]` | `.stage() == Stage::Executable` |
-| 4 | `each_debug_flag_selects_its_stage` | `--dump-tokens`, `--dump-ast`, `--check`, `-S` | `Stage::Tokens`, `Ast`, `Check`, `Assembly` respectively |
-| 5 | `debug_flags_conflict_with_each_other` | argv with both `--dump-tokens` and `--check` | Parse fails (`is_err()`) |
-| 6 | `input_file_is_required` | argv `["rustycc"]` (no input) | Parse fails |
-| 7 | `keep_temps_defaults_off` | No flag vs. `--keep-temps` | `false` then `true` |
-| 8 | `for_source_matches_the_parsed_equivalent` | `Options::for_source(...,Tokens)` vs. parsed `--dump-tokens` | Same `.input`, same `.stage()` |
-
-### `src/lib.rs` (4 tests)
-
-| # | Test | Input | Expected output |
-|---|------|-------|------------------|
-| 9 | `empty_source_compiles` | `compile(b"", "empty.c", Options::for_source(..., Tokens))` | `Ok(...)` |
-| 10 | `missing_input_is_a_read_error` | `run(Options::for_source("no-such-file.c", Tokens))` | `Err(Error::Read{path,..})` with `path=="no-such-file.c"` |
-| 11 | `read_error_message_names_the_path` | `Error::Read{path:"missing.c", cause: NotFound}` | `.to_string() == "cannot read 'missing.c': No such file or directory"` |
-| 12 | `rejection_message_agrees_in_number` | `Error::Rejected{count:1}`, `{count:3}` | `"1 error generated"`, `"3 errors generated"` |
-
-### `tests/cli.rs` (3 tests)
-
-| # | Test | Input | Expected output |
-|---|------|-------|------------------|
-| 13 | `no_arguments_prints_usage_and_fails` | Run `rustycc` binary with no args | Non-zero exit; stderr contains "Usage"/"usage" |
-| 14 | `missing_input_file_reports_a_readable_error` | Run `rustycc definitely-not-here.c` | Non-zero exit; stderr contains the path; stderr does NOT contain "panicked" |
-| 15 | `compiler_is_callable_in_process` | `rustycc::compile(b"", "in-memory.c", Options::for_source(..., Tokens))` | `.expect(...)` succeeds — no file system access, no child process |
+<!-- inventory: src/cli/tests.rs, src/driver/tests.rs, src/tests.rs, tests/cli.rs -->
+| # | Test | What it pins |
+| --- | --- | --- |
+| 1 | `command_definition_is_valid` | The clap definition itself is well formed; clap asserts this, and a broken `#[arg]` otherwise only shows up at runtime. |
+| 2 | `parses_the_documented_invocation` | The documented contract `rustycc program.c -o program` parses into input and output paths. |
+| 3 | `default_stage_is_an_executable` | With no debug flag, the run goes all the way to an executable. |
+| 4 | `each_debug_flag_selects_its_stage` | Each debug flag stops the pipeline at its own stage. |
+| 5 | `debug_flags_conflict_with_each_other` | The debug flags are mutually exclusive; asking to stop in two places is a usage error. |
+| 6 | `input_file_is_required` | An input file is required, so a bare `rustycc` is a usage error rather than a silent no-op. |
+| 7 | `keep_temps_defaults_off` | `--keep-temps` is off unless asked for. |
+| 8 | `for_source_matches_the_parsed_equivalent` | `for_source` builds the same options argv would, so library callers get one code path. |
+| 9 | `preflight_finds_the_toolchain` | A toolchain that is present reports itself as present. |
+| 10 | `empty_source_compiles` | An empty translation unit is valid C and compiles without diagnostics. |
+| 11 | `missing_input_is_a_read_error` | A missing input file is an `Error::Read` naming the path, not a panic. |
+| 12 | `read_error_message_names_the_path` | The rendered form of a read failure names the path and the underlying cause. |
+| 13 | `rejection_message_agrees_in_number` | The rejection summary agrees in number with the count it reports. |
+| 14 | `no_arguments_prints_usage_and_fails` | Running `rustycc` with no arguments prints usage and exits non-zero. |
+| 15 | `missing_input_file_reports_a_readable_error` | A missing input file is reported readably rather than as a panic or a bare exit code. |
+| 16 | `compiler_is_callable_in_process` | The compiler is callable as a library, with no child process and no file system access. |
+| 17 | `check_accepts_every_valid_program` | `rustycc --check` exits 0 for every valid program in the corpus and prints nothing. |
+| 18 | `check_rejects_every_invalid_program` | `rustycc --check` exits non-zero for every program in the invalid corpus, with a rendered error. |
+| 19 | `dump_annotations_prints_the_annotation_tables` | `rustycc --dump-annotations` prints what analysis recorded, for a program that analyzes. |
+| 20 | `compiling_and_running_a_program_works_end_to_end` | `rustycc program.c -o program && ./program` works, which is the contract the proposal states. |
+| 21 | `dash_s_emits_assembly_and_no_binary` | `-S` writes assembly and produces no binary. |
+| 22 | `dash_c_emits_an_object_file` | `-c` produces an object file rather than an executable. |
+| 23 | `emit_asm_to_writes_the_assembly_alongside_the_binary` | `--emit-asm-to` writes the assembly to the given path while still producing the program. |
+| 24 | `intermediates_are_removed_unless_they_are_asked_for` | Intermediate files are gone once the run ends, and kept when the caller asks. |
+| 25 | `a_failing_link_is_reported_and_cleans_up` | A failing link leaves nothing behind either, and says what the toolchain said. |
+| 26 | `concurrent_compilations_do_not_collide` | Two compilations running at once do not write over each other's intermediates. |
+<!-- end inventory -->
 
 ## Actual Outputs
 
-Executed as part of `cargo test --lib` and `cargo test --test cli` (full unedited capture in
-`reports/unit_tests/cargo_test_output.txt`):
+Every test in the table above passed, with no failures, and both lint gates — `cargo fmt --check`
+and `cargo clippy --all-targets -- -D warnings` — were clean.
 
-```
-test cli::tests::command_definition_is_valid ... ok
-test cli::tests::default_stage_is_an_executable ... ok
-test cli::tests::input_file_is_required ... ok
-test cli::tests::keep_temps_defaults_off ... ok
-test cli::tests::parses_the_documented_invocation ... ok
-test cli::tests::for_source_matches_the_parsed_equivalent ... ok
-test cli::tests::debug_flags_conflict_with_each_other ... ok
-test cli::tests::each_debug_flag_selects_its_stage ... ok
-test tests::empty_source_compiles ... ok
-test tests::missing_input_is_a_read_error ... ok
-test tests::read_error_message_names_the_path ... ok
-test tests::rejection_message_agrees_in_number ... ok
-
-     Running tests/cli.rs
-test compiler_is_callable_in_process ... ok
-test no_arguments_prints_usage_and_fails ... ok
-test missing_input_file_reports_a_readable_error ... ok
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
-```
-
-**Result: all 15 tests passed.** No failures. The `tests/cli.rs` suite genuinely exercises the
-built `target/debug/rustycc` binary as a subprocess (confirmed by the 0.38s wall time, consistent
-with process spawn overhead rather than in-process function calls). `cargo clippy --all-targets --
--D warnings` and `cargo fmt --check` reported no violations against any of `src/cli.rs`,
-`src/lib.rs`, `src/main.rs`, or `tests/cli.rs`.
+The complete, unedited output of that run is checked in beside this report as
+[`evidence/cargo-test.txt`](evidence/cargo-test.txt), and the versions of everything it was run with
+are in [`evidence/environment.txt`](evidence/environment.txt). Both are regenerated by
+`scripts/test-evidence.sh`, so this report can be re-verified against the code rather than trusted.

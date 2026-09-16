@@ -15,7 +15,7 @@ recovery and the stack-safety guard.
 
 ## Date
 
-2026-08-23
+2026-09-16
 
 ## Engineers
 
@@ -132,149 +132,81 @@ tested by `unsupported_constructs_are_named`), and all three stated cross-cuttin
 (reports-and-continues, terminates, stack-safe) have direct, targeted tests — not merely incidental
 coverage from testing the happy path. The corpus-truncation tests provide coverage of the input
 space that hand-written cases cannot feasibly enumerate (every prefix of every corpus program, at
-both token and byte granularity). The one explicitly acknowledged gap, consistent with the
-Diagnostics/Lexer units: true `cargo-fuzz`-driven fuzzing of the whole front end is a documented
-Phase 5 deliverable, not yet present in this repo (confirmed: no `fuzz/` directory exists and
-`cargo fuzz` is not installed — see `reports/unit_tests/00-environment.md`); the corpus-truncation
-suite here is the interim, deterministic technique the project's own documentation
-(`AGENTS.md`, `docs/dive-deep/testing.md`) describes as the "cheap precursor" to it.
+both token and byte granularity). The corpus-truncation suite is what the project's own documentation calls the
+"cheap precursor" to fuzzing: deterministic, fast, and run on every change. `fuzz/fuzz_targets/parse.rs`
+is the generated version, which mutates arbitrary bytes for as long as it is given and asserts the
+same properties; `fuzz/regressions/` is where anything it finds becomes an ordinary test in this
+suite. Both are reported in
+[14 — The Differential Harness](14-differential-harness.md).
 
 ## Automated Test Code
 
-48 tests total: 30 in `src/parser/mod.rs` under `#[cfg(test)] mod tests`, 8 in
-`tests/parser_no_panic.rs`, and 10 in `tests/parser_snapshots.rs`.
+The tests live in `src/parser/tests.rs`, with the AST snapshots in `tests/parser_snapshots.rs` and
+the truncation and adversarial sweeps in `tests/frontend_no_panic.rs`. The table is generated from
+the tests themselves, so it cannot fall out of step with them.
 
-### `src/parser/mod.rs` (30 tests)
-
-| # | Test | Input | Expected output |
-|---|------|-------|------------------|
-| 1 | `the_parser_gives_every_node_a_distinct_id` | `BROAD` fixture (~15-line program spanning most of the grammar) | >40 AST nodes; all ids distinct |
-| 2 | `every_span_points_into_the_source` | `BROAD` fixture | Every node span: `start<=end`, `end<=len(source)`, non-empty |
-| 3 | `an_empty_file_is_an_empty_program` | `""` | `"(program)\n"` |
-| 4 | `a_function_definition_parses` | `int main(void) { return 0; }` | Exact dump: func-def → params → block → return → int-lit |
-| 5 | `empty_and_void_parameter_lists_agree` | `int f() { }` vs `int f(void) { }` | Identical dumps |
-| 6 | `a_forward_declaration_precedes_its_definition` | `int f(int n); int f(int n) { return n; }` | `(program (func-decl ...) (func-def ...))` |
-| 7 | `functions_take_zero_through_nine_parameters` | 0 through 9 params | `(param ` count matches param count, each |
-| 8 | `every_declaration_form_parses` | 8 declaration forms (see methodology) | Exact shape string per case |
-| 9 | `every_statement_form_parses` | 12 statement forms wrapped in `void f(void){...}` | Exact shape string per case |
-| 10 | `bodies_may_be_a_single_unbraced_statement` | `if(a)b;`, `while(a)b;`, `for(;;)b;` | Dump does not contain `(block (block` (no implicit re-wrapping) |
-| 11 | `a_dangling_else_binds_to_the_nearest_if` | 3-deep nested `if`/`else` | `else` binds to innermost `if` |
-| 12 | `every_combination_of_for_clauses_parses` | All 8 combos of init/cond/step present or absent | Each dump slot present iff its clause was written |
-| 13 | `a_for_initializer_may_declare` | `for (int i = 0; i < 3; i = i + 1) x;` | Dump contains `(init (local-var int i (init (int-lit 0))))` |
-| 14 | `a_declaration_may_not_be_a_branch_body` | Decl as `if`/`while`/`for` body, 3 cases | `["a declaration is not allowed here"]` each |
-| 15 | `syntax_errors_name_the_token_they_wanted` | 10 malformed programs | 10 exact "expected X, found Y" / custom messages |
-| 16 | `a_keyword_used_as_an_identifier_is_rejected` | `int while;`, `int f(void){int return;}` | `"expected an identifier, found 'while'"`, `"...'return'"` |
-| 17 | `two_errors_produce_exactly_two_diagnostics` | Two `int a = ;` mistakes in one function | Exactly 2 identical "expected an expression, found ';'" |
-| 18 | `parsing_resumes_after_a_bad_statement` | `int f(void) { int a = ; return 7; }` | 1 diagnostic; tree still contains `return 7` |
-| 19 | `recovery_does_not_swallow_the_following_function` | Missing `;` in `f`, valid `g` follows | 1 diagnostic; both functions present in tree |
-| 20 | `an_unbalanced_brace_at_eof_reports_once` | `int f(void) { int a = 1;` (no closing brace) | `["expected '}', found end of file"]` |
-| 21 | `a_file_of_closing_parentheses_terminates` | 33 `)` characters | Non-empty, but < 5 diagnostics (bounded) |
-| 22 | `a_file_of_braces_terminates` | 4 unbalanced-brace fixtures | Each: parse completes with non-empty diagnostics |
-| 23 | `unsupported_constructs_are_named` | 18 out-of-subset constructs (`struct`, `union`, `sizeof`, pointers, etc.) | Each: first message == `"unsupported in this C subset: '<word>'"` |
-| 24 | `an_out_of_subset_type_definition_reports_once` | `struct`/`union`/`enum`/`typedef` definitions | Each: exactly 1 diagnostic |
-| 25 | `parsing_resumes_after_an_unsupported_definition` | `struct point {...}; int main(...){...}` | 1 diagnostic; `main` still parses (1 item) |
-| 26 | `nesting_past_the_limit_is_reported` | Expression nested `MAX_NESTING_DEPTH*4` deep | First message starts `"nesting is too deep"` |
-| 27 | `deeply_nested_blocks_are_reported` | Blocks nested `MAX_NESTING_DEPTH*4` deep | Same |
-| 28 | `nesting_stays_within_a_small_stack` | Same deep-nesting input, parsed on a 512 KiB thread stack | Parses (no overflow); reports depth-limit message |
-| 29 | `nesting_within_the_limit_parses` | Nested `MAX_NESTING_DEPTH/4` deep | Dump contains `(int-lit 1)` (parses successfully) |
-| 30 | `an_empty_token_slice_parses` | `parse(&[])` (no `Eof` even) | Empty program; no diagnostics |
-
-### `tests/parser_no_panic.rs` (8 tests)
-
-| # | Test | Input | Expected output |
-|---|------|-------|------------------|
-| 31 | `token_level_truncations_do_not_panic` | Every corpus program, truncated at every token boundary | Every truncation parses without panic/hang |
-| 32 | `byte_level_truncations_do_not_panic` | Every corpus program, truncated at every byte offset | Same, finer granularity |
-| 33 | `a_truncated_program_is_reported` | `functions.c` truncated to 2/3 length | `parse(prefix) > 0` diagnostics (sanity check the technique isn't vacuous) |
-| 34 | `adversarial_inputs_do_not_panic` | 8+ hand-written adversarial `.c` fixtures | All parse without panic |
-| 35 | `inputs_with_no_tokens_are_empty_programs` | `empty.c`, `only_whitespace.c`, `only_comment.c` | Empty program; 0 diagnostics, each |
-| 36 | `deep_nesting_reports_the_depth_limit` | `deep_parens.c`, `deep_blocks.c`, `deep_unclosed_parens.c` | Each: a diagnostic starting `"nesting is too deep"` |
-| 37 | `a_file_of_operators_reports_a_bounded_number_of_times` | `only_operators.c` | Non-empty diagnostics; count ≤ token count |
-| 38 | `very_long_tokens_are_carried_through` | `long_identifier.c` | 0 diagnostics; 1 item parsed |
-
-### `tests/parser_snapshots.rs` (10 tests)
-
-| # | Test | Input | Expected output |
-|---|------|-------|------------------|
-| 39 | `every_program_is_in_the_coverage_matrix` | Every corpus `.c` file name | Present in `COVERAGE.md` |
-| 40 | `the_corpus_has_programs_in_it` | Corpus directory listing | ≥ 5 programs |
-| 41 | `every_program_parses` | Every corpus program | Dump starts with `"(program\n"` |
-| 42 | `the_dump_is_deterministic_across_runs` | Every corpus program, dumped twice | Byte-identical both times |
-| 43 | `arithmetic_program_tree` | `arithmetic.c` | Matches pinned snapshot |
-| 44 | `control_flow_program_tree` | `control_flow.c` | Matches pinned snapshot |
-| 45 | `functions_program_tree` | `functions.c` | Matches pinned snapshot |
-| 46 | `arrays_program_tree` | `arrays.c` | Matches pinned snapshot |
-| 47 | `strings_program_tree` | `strings.c` | Matches pinned snapshot |
-| 48 | `spans_are_recorded_for_every_node` | `int add(int a, int b) { return a + b; }` | Exact inline snapshot with `@start..end` on every node |
+<!-- inventory: src/parser/tests.rs, tests/parser_snapshots.rs, tests/frontend_no_panic.rs -->
+| # | Test | What it pins |
+| --- | --- | --- |
+| 1 | `the_parser_lists_every_node_it_built_exactly_once` | Every node the parser builds gets an identity no other node has, and `ast::nodes` lists every one of them. Phase 3 keys its annotations by these ids, so a collision would give two nodes the same type and an omission would leave a node with none. |
+| 2 | `every_span_points_into_the_source` | Every span the parser records is a real range inside the file it came from. |
+| 3 | `an_empty_file_is_an_empty_program` | An empty file is a valid translation unit with nothing in it. |
+| 4 | `a_function_definition_parses` | A function definition carries its return type, name, parameters, and body. |
+| 5 | `empty_and_void_parameter_lists_agree` | An empty parameter list and an explicit `(void)` mean the same thing. |
+| 6 | `a_forward_declaration_precedes_its_definition` | A declaration without a body is a forward declaration, and may be followed by the definition it promised. |
+| 7 | `functions_take_zero_through_nine_parameters` | Zero through nine parameters parse. Nine matters because the ninth crosses the eight-register boundary the ABI draws in Phase 4. |
+| 8 | `every_declaration_form_parses` | Every declaration form the grammar allows parses to the shape it describes. |
+| 9 | `every_statement_form_parses` | Every statement form the grammar allows parses to the shape it describes. |
+| 10 | `bodies_may_be_a_single_unbraced_statement` | A body may be a single statement without braces, at any of the three loop and branch forms. |
+| 11 | `a_dangling_else_binds_to_the_nearest_if` | A dangling `else` binds to the nearest `if`, checked three deep so a rule that happened to work at two levels does not pass by luck. |
+| 12 | `every_combination_of_for_clauses_parses` | All eight combinations of a present or absent `for` clause parse, each keeping its own slot in the dump so an omitted clause cannot be mistaken for a shifted one. |
+| 13 | `a_for_initializer_may_declare` | A `for` initializer may declare its own variable. |
+| 14 | `a_declaration_may_not_be_a_branch_body` | A declaration is a block item, not a statement, so it may not be a branch or loop body. |
+| 15 | `syntax_errors_name_the_token_they_wanted` | Each syntax error names what was wanted and what was there, in source spelling. |
+| 16 | `a_keyword_used_as_an_identifier_is_rejected` | A keyword where a name belongs is reported as the keyword it is. |
+| 17 | `two_errors_produce_exactly_two_diagnostics` | Two independent mistakes in one function produce two diagnostics, not a cascade. |
+| 18 | `parsing_resumes_after_a_bad_statement` | Recovery resumes at the next statement, so what follows a mistake still parses. |
+| 19 | `recovery_does_not_swallow_the_following_function` | A mistake in one function does not consume the next one. |
+| 20 | `an_unbalanced_brace_at_eof_reports_once` | A brace left open at the end of the file is reported once, not once per line after it. |
+| 21 | `a_file_of_closing_parentheses_terminates` | Recovery cannot loop: a file of nothing but closing parentheses ends, having complained a bounded number of times. |
+| 22 | `a_file_of_braces_terminates` | A file of nothing but braces ends too, whichever way they are unbalanced. |
+| 23 | `unsupported_constructs_are_named` | Every C construct the subset leaves out is named as such, rather than reported as a program that does not parse. |
+| 24 | `an_out_of_subset_type_definition_reports_once` | A type definition is one diagnostic, not one for the keyword and another for the `};` left behind after recovery skipped its body. |
+| 25 | `parsing_resumes_after_an_unsupported_definition` | A definition the subset lacks does not take the declarations after it down with it. |
+| 26 | `every_deep_shape_meets_the_depth_limit` | Every way of deepening the tree past the limit is a diagnostic rather than a stack overflow. |
+| 27 | `deep_input_stays_within_a_small_stack` | Everything done with a parsed tree fits on a stack far smaller than any the compiler runs on, however deep the input tried to make it. |
+| 28 | `every_shape_within_the_limit_parses` | Every shape nested inside the limit still parses, so the guard rejects only what it must. |
+| 29 | `the_depth_limit_charges_nothing_to_what_follows` | Meeting the limit costs nothing afterwards: the levels a rejected or finished construct used are all given back, so what follows it is judged from the depth it is actually at. |
+| 30 | `an_operand_gives_back_its_levels_to_the_chain_around_it` | A chain whose operands are chains of their own is charged for its depth, not its length. |
+| 31 | `an_empty_token_slice_parses` | An empty token slice is a valid, empty parse rather than an out-of-bounds read. The Phase 5 fuzz targets can hand the parser one, so it may not assume the lexer's trailing `Eof`. |
+| 32 | `every_program_is_in_the_coverage_matrix` | Every program in the corpus has a row in the coverage matrix. |
+| 33 | `the_corpus_has_programs_in_it` | The corpus is not empty, so the checks over it are not passing by having nothing to check. |
+| 34 | `every_program_parses` | Every program in the corpus parses, which is the exit criterion `--dump-ast` is held to. |
+| 35 | `the_dump_is_deterministic_across_runs` | Dumping the same program twice produces the same bytes. |
+| 36 | `arithmetic_program_tree` | The whole tree for the arithmetic corpus program: every operator and how they group. |
+| 37 | `control_flow_program_tree` | The whole tree for the control-flow corpus program: every branch and loop form. |
+| 38 | `functions_program_tree` | The whole tree for the functions corpus program: declarations, definitions, and calls. |
+| 39 | `arrays_program_tree` | The whole tree for the arrays corpus program: declaration, indexing, and passing. |
+| 40 | `strings_program_tree` | The whole tree for the strings corpus program: literals, `char` arrays, and escapes. |
+| 41 | `spans_are_recorded_for_every_node` | A dump with spans on, for one small program, so the positions the parser records are pinned somewhere rather than only being asserted to exist. |
+| 42 | `a_stream_without_its_eof_parses_as_if_it_had_one` | A token stream that does not end in `Eof` parses exactly as the same stream with it. |
+| 43 | `token_level_truncations_do_not_panic` | Every prefix of every corpus program, cut at a token boundary, parses without panicking. |
+| 44 | `byte_level_truncations_do_not_panic` | Every prefix cut at an arbitrary byte parses too, which covers what a token-boundary cut cannot produce: half a literal, half a comment, half an operator. |
+| 45 | `a_truncated_program_is_reported` | Cutting a program short is never silently fine: a prefix that stops mid-construct is reported. |
+| 46 | `adversarial_inputs_do_not_panic` | Every hand-written awkward input parses without panicking or hanging. |
+| 47 | `inputs_with_no_tokens_are_empty_programs` | The inputs with nothing in them parse to an empty program and report nothing. |
+| 48 | `deep_nesting_reports_the_depth_limit` | The deeply nested inputs meet the depth limit and say so, rather than exhausting the stack. |
+| 49 | `a_file_of_operators_reports_a_bounded_number_of_times` | A file of nothing but operators reports a bounded number of times rather than once per token. |
+| 50 | `very_long_tokens_are_carried_through` | A very long name and a very long literal are carried through rather than truncated or refused. |
+| 51 | `the_whole_front_end_survives_the_awkward_inputs` | Every awkward input goes through the whole front end, not only the parser, without panicking. |
+<!-- end inventory -->
 
 ## Actual Outputs
 
-Executed as part of `cargo test --lib`, `cargo test --test parser_no_panic`, and
-`cargo test --test parser_snapshots` (full unedited capture in
-`reports/unit_tests/cargo_test_output.txt`):
+Every test in the table above passed, with no failures, and both lint gates — `cargo fmt --check`
+and `cargo clippy --all-targets -- -D warnings` — were clean.
 
-```
-     Running unittests src/lib.rs
-test parser::tests::a_file_of_braces_terminates ... ok
-test parser::tests::a_declaration_may_not_be_a_branch_body ... ok
-test parser::tests::a_file_of_closing_parentheses_terminates ... ok
-test parser::tests::a_forward_declaration_precedes_its_definition ... ok
-test parser::tests::a_for_initializer_may_declare ... ok
-test parser::tests::a_keyword_used_as_an_identifier_is_rejected ... ok
-test parser::tests::a_function_definition_parses ... ok
-test parser::tests::an_empty_token_slice_parses ... ok
-test parser::tests::an_empty_file_is_an_empty_program ... ok
-test parser::tests::a_dangling_else_binds_to_the_nearest_if ... ok
-test parser::tests::an_out_of_subset_type_definition_reports_once ... ok
-test parser::tests::an_unbalanced_brace_at_eof_reports_once ... ok
-test parser::tests::empty_and_void_parameter_lists_agree ... ok
-test parser::tests::every_span_points_into_the_source ... ok
-test parser::tests::deeply_nested_blocks_are_reported ... ok
-test parser::tests::bodies_may_be_a_single_unbraced_statement ... ok
-test parser::tests::every_declaration_form_parses ... ok
-test parser::tests::nesting_past_the_limit_is_reported ... ok
-test parser::tests::nesting_within_the_limit_parses ... ok
-test parser::tests::functions_take_zero_through_nine_parameters ... ok
-test parser::tests::parsing_resumes_after_a_bad_statement ... ok
-test parser::tests::nesting_stays_within_a_small_stack ... ok
-test parser::tests::parsing_resumes_after_an_unsupported_definition ... ok
-test parser::tests::every_combination_of_for_clauses_parses ... ok
-test parser::tests::recovery_does_not_swallow_the_following_function ... ok
-test parser::tests::every_statement_form_parses ... ok
-test parser::tests::syntax_errors_name_the_token_they_wanted ... ok
-test parser::tests::two_errors_produce_exactly_two_diagnostics ... ok
-test parser::tests::the_parser_gives_every_node_a_distinct_id ... ok
-test parser::tests::unsupported_constructs_are_named ... ok
-
-     Running tests/parser_no_panic.rs
-test a_truncated_program_is_reported ... ok
-test inputs_with_no_tokens_are_empty_programs ... ok
-test a_file_of_operators_reports_a_bounded_number_of_times ... ok
-test deep_nesting_reports_the_depth_limit ... ok
-test very_long_tokens_are_carried_through ... ok
-test adversarial_inputs_do_not_panic ... ok
-test token_level_truncations_do_not_panic ... ok
-test byte_level_truncations_do_not_panic ... ok
-test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.76s
-
-     Running tests/parser_snapshots.rs
-test every_program_is_in_the_coverage_matrix ... ok
-test the_corpus_has_programs_in_it ... ok
-test every_program_parses ... ok
-test the_dump_is_deterministic_across_runs ... ok
-test spans_are_recorded_for_every_node ... ok
-test strings_program_tree ... ok
-test arithmetic_program_tree ... ok
-test control_flow_program_tree ... ok
-test arrays_program_tree ... ok
-test functions_program_tree ... ok
-test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
-```
-
-**Result: all 48 tests passed** (30 unit + 8 corpus-truncation integration + 10 snapshot
-integration). No failures, no ignored tests. All 5 corpus-program snapshots and the inline
-spans-shown snapshot compared cleanly with no diff. `cargo clippy --all-targets -- -D warnings` and
-`cargo fmt --check` reported no violations against any of the three files. Note:
-`byte_level_truncations_do_not_panic` and `token_level_truncations_do_not_panic` alone represent
-several thousand individual parse invocations (every byte offset × 5 corpus programs), all executing
-without panic or hang, within the reported 0.76s for the whole `parser_no_panic` binary.
+The complete, unedited output of that run is checked in beside this report as
+[`evidence/cargo-test.txt`](evidence/cargo-test.txt), and the versions of everything it was run with
+are in [`evidence/environment.txt`](evidence/environment.txt). Both are regenerated by
+`scripts/test-evidence.sh`, so this report can be re-verified against the code rather than trusted.

@@ -24,9 +24,15 @@ This unit's tests don't run the scanner or the parser at all. They build sample 
 files by hand, so what's being tested here is only this piece, in isolation, not how the rest of the
 compiler uses it.
 
-Source: [diagnostics.rs](https://github.com/sid-ak/rusty_c_compiler/blob/main/src/diagnostics.rs)
-Date: 2026-08-23
-Engineer: Sidharth Anandkumar
+Source under test: `src/diagnostics.rs`.
+
+## Date
+
+2026-09-16
+
+## Engineers
+
+Sidharth Anandkumar (sole engineer)
 
 ## Test Methodology
 
@@ -98,36 +104,40 @@ their own tests instead.
 The table below lists every automated test for this unit, what it's checking and why, and what was
 fed in and expected back — in plain terms rather than code syntax.
 
-| # | Test | Purpose | Input | Expected output |
-|---|------|---------|-------|------------------|
-| 1 | `span_length_is_its_byte_extent` | Confirms a span's length is calculated correctly, including for an empty span. | A span from byte 3 to byte 7, and a zero-width span at byte 3. | The first span is 4 bytes long and not empty; the zero-width span is empty. |
-| 2 | `reversed_span_clamps_to_empty` | Confirms a span whose start comes after its end doesn't break anything — it's treated as empty instead. | A span running backwards, from byte 9 to byte 4. | Treated the same as an empty span at byte 9, with zero length. |
-| 3 | `joining_spans_covers_both` | Confirms combining two spans produces one span covering both, regardless of the order they're combined in. | Two separate spans, combined both ways. | Both combinations produce the identical single span covering the full range. |
-| 4 | `spans_sort_in_source_order` | Confirms spans sort by where they appear in the file. | Three spans, listed out of order. | Sorting puts them back into the order they appear in the source. |
-| 5 | `notes_attach_without_changing_the_message` | Confirms attaching explanatory notes to an error doesn't alter its category, message, or position. | An error with two notes attached. | The category, message, and position stay unchanged; both notes are attached in the order added. |
-| 6 | `unsupported_reads_the_same_from_either_pass` | Confirms that when different parts of the compiler report "this isn't part of the supported C subset," the wording is identical no matter which part reported it. | The same kind of not-supported error, once as if found while scanning and once as if found while parsing. | Both produce the same wording style, differing only in what construct they name. |
-| 7 | `offsets_resolve_to_line_and_column` | Confirms raw file positions convert correctly to line and column numbers. | A 3-line sample file, checked at the start, mid-line, end of a line, start of the next line, and near the end. | Each position converts to the correct line and column. |
-| 8 | `eof_without_a_trailing_newline_stays_on_the_last_line` | Confirms the end of a file with no blank final line is still reported as being on the last real line. | The very last position of a 3-line file with no trailing blank line. | Reported as line 3. |
-| 9 | `eof_after_a_trailing_newline_opens_a_new_line` | Confirms a file that does end with a line break is treated as having one extra, empty line after it. | The very last position of a file ending in a line break. | Reported as line 2 (the new, empty line). |
-| 10 | `offset_past_the_end_clamps` | Confirms a position beyond the file's actual end doesn't cause a problem — it's treated as if it were exactly at the end. | A position far past the end of a file, compared with the position exactly at the end. | Both resolve to the identical line and column. |
-| 11 | `empty_source_is_one_empty_line` | Confirms a completely empty file is handled gracefully, as one blank line. | An empty file. | Reported as line 1, column 1. |
-| 12 | `a_tab_advances_the_column_by_one` | Confirms a tab character counts as exactly one column — matching how `clang` reports positions — rather than jumping to the next tab stop. | A line starting with two tab characters. | Each position after a tab advances the column count by exactly one. |
-| 13 | `crlf_numbers_lines_the_same_as_lf` | Confirms files using Windows-style line endings are numbered identically to files using the standard line ending. | The same 3-line sample file, once with each line-ending style. | Both produce identical line numbers throughout. |
-| 14 | `crlf_line_renders_without_the_carriage_return` | Confirms the extra character used in Windows-style line endings doesn't leak into a printed error message. | A Windows-line-ending file, with a sample error on line 2. | The rendered message has no leftover Windows line-ending characters and correctly names line 2, column 5. |
-| 15 | `single_line_diagnostic_rendering_is_stable` | Locks in the exact, complete appearance of a rendered error — the file position, the message, the copied source line, the pointer beneath it, and an attached note — so any future change to the format is caught immediately. | A short sample program with an "unterminated string literal" error and an explanatory note. | The rendered message matches a fixed, exact multi-line layout. |
-| 16 | `caret_padding_reproduces_tabs` | Confirms the pointer under an error still lines up correctly when the source line is indented with tabs. | A line indented with two tabs, with an error spanning part of it. | The pointer is preceded by the same two tab characters, so it still lines up under the right text. |
-| 17 | `multi_line_span_does_not_spill_past_the_line` | Confirms the pointer never runs past the end of the printed line, even when the underlying problem technically spans multiple lines. | An error whose position spans across two line breaks. | The pointer is drawn only to the end of the first line, not beyond it. |
-| 18 | `empty_span_renders_a_single_caret` | Confirms a problem with no width at all (something expected but missing) still shows a visible pointer. | A zero-width error at a specific position. | Exactly one pointer character is shown at that position. |
-| 19 | `diagnostic_at_eof_renders` | Confirms an error reported at the very end of a file, on an empty final line, renders without crashing. | An "unexpected end of file" error at the very end of a short file. | Renders correctly, naming line 2 (the empty line after the content). |
-| 20 | `invalid_utf8_line_still_renders` | Confirms the compiler doesn't crash when reporting on a file that contains a byte that isn't valid readable text. | A line containing one invalid, unreadable byte, with an error pointing at it. | The message still renders, showing what it can of the offending line rather than crashing. |
-| 21 | `bag_reports_in_source_order` | Confirms that when multiple problems are collected during a run, they come back out in file order, regardless of the order they were found in. | Three errors added in a scrambled order. | Retrieved back in correct source order. |
-| 22 | `bag_sort_is_stable_within_a_position` | Confirms two problems found at the exact same position keep the order they were originally found in, rather than being shuffled. | Two errors added at the identical position. | Both come back in the same order they were added. |
-| 23 | `empty_bag_is_empty` | Confirms the problem collector correctly reports whether it has anything in it. | A freshly created, empty collector, then one error added to it. | Reports empty and a count of zero beforehand; not-empty and a count of one afterward. |
+<!-- inventory: src/diagnostics/tests.rs -->
+| # | Test | What it pins |
+| --- | --- | --- |
+| 1 | `span_length_is_its_byte_extent` | A span's length is its byte extent, and a zero-width span is empty. |
+| 2 | `reversed_span_clamps_to_empty` | A reversed range clamps to empty rather than underflowing on `len`. |
+| 3 | `joining_spans_covers_both` | Joining two spans covers both, in either order. |
+| 4 | `spans_sort_in_source_order` | Spans sort in source order, which is the order diagnostics are reported in. |
+| 5 | `notes_attach_without_changing_the_message` | Notes attach to a diagnostic without disturbing its message or span. |
+| 6 | `unsupported_reads_the_same_from_either_pass` | Every pass phrases an out-of-subset construct identically, whichever pass noticed it. |
+| 7 | `offsets_resolve_to_line_and_column` | Offsets resolve at the file start, at a line start, mid-line, at a line end, and at EOF. |
+| 8 | `eof_without_a_trailing_newline_stays_on_the_last_line` | The end of a file with no trailing newline is a position on the last line. |
+| 9 | `eof_after_a_trailing_newline_opens_a_new_line` | A trailing newline opens a line, so the end of such a file is the start of the line after. |
+| 10 | `offset_past_the_end_clamps` | An offset past the end of the file clamps to the end rather than escaping the source. |
+| 11 | `empty_source_is_one_empty_line` | An empty file has one line, and its only position is 1:1. |
+| 12 | `a_tab_advances_the_column_by_one` | A tab is one column, not a jump to the next tab stop — the documented, clang-matching rule. |
+| 13 | `crlf_numbers_lines_the_same_as_lf` | CRLF files number their lines identically to LF files. |
+| 14 | `crlf_line_renders_without_the_carriage_return` | A carriage return is trimmed from the rendered line, so the caret is not pushed by it. |
+| 15 | `single_line_diagnostic_rendering_is_stable` | The exact rendered form of a single-line diagnostic, pinned so later phases inherit it. |
+| 16 | `caret_padding_reproduces_tabs` | The caret sits under a tab-indented construct rather than beside it, because the padding reproduces the tabs instead of counting them as one space each. |
+| 17 | `multi_line_span_does_not_spill_past_the_line` | A span reaching past the end of its line underlines to the line end and no further. |
+| 18 | `empty_span_renders_a_single_caret` | A zero-width span still points somewhere: one caret, no underline. |
+| 19 | `diagnostic_at_eof_renders` | A span at the very end of a file renders without panicking on the empty final line. |
+| 20 | `invalid_utf8_line_still_renders` | Invalid UTF-8 in the offending line is rendered lossily rather than aborting the report. |
+| 21 | `bag_reports_in_source_order` | The bag reports in source order however the diagnostics went in. |
+| 22 | `bag_sort_is_stable_within_a_position` | Two diagnostics at the same position keep the order the pass found them in. |
+| 23 | `empty_bag_is_empty` | An empty bag is what a clean run leaves behind. |
+<!-- end inventory -->
 
 ## Actual Outputs
 
-All 23 automated tests for this unit passed — every actual result matched its expected result
-exactly, with no failures. This was confirmed by running the full test suite (`cargo test`) as well
-as the project's formatting and linting checks (`cargo fmt`, `cargo clippy`), all of which completed
-cleanly. The complete, unedited console output from that run is kept in `scripts/cargo_test_output.txt`
-for reference.
+Every test in the table above passed, with no failures, and both lint gates — `cargo fmt --check`
+and `cargo clippy --all-targets -- -D warnings` — were clean.
+
+The complete, unedited output of that run is checked in beside this report as
+[`evidence/cargo-test.txt`](evidence/cargo-test.txt), and the versions of everything it was run with
+are in [`evidence/environment.txt`](evidence/environment.txt). Both are regenerated by
+`scripts/test-evidence.sh`, so this report can be re-verified against the code rather than trusted.

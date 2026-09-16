@@ -8,14 +8,14 @@ into every compiled program), `src/runtime.rs` (`SHIM_OBJECT`/`shim_object()`, t
 to the object the build script compiles), and `tests/runtime_shim.rs` (the integration suite that
 compiles, links, and runs real programs against the shim). Per ADR 0006, this is deliberately the
 one piece of the "compiled output" side of the system that exists before code generation does: it is
-ordinary C, built once by `clang`, and the same object will be linked into both `rustycc`-compiled
-and `clang`-compiled binaries during Phase 5's differential testing — so a bug in the shim itself
-would corrupt *both* sides of every future differential comparison identically, which is exactly why
+ordinary C, built once by `clang`, and the same object is linked into both the `rustycc`-compiled
+and the `clang`-compiled binary of every differential comparison — so a bug in the shim itself
+would corrupt *both* sides of every comparison identically, which is exactly why
 it is tested exhaustively and independently now, ahead of code generation existing at all.
 
 ## Date
 
-2026-08-23
+2026-09-16
 
 ## Engineers
 
@@ -103,44 +103,33 @@ a differential comparison contains the identical runtime") but is not itself a t
 
 ## Automated Test Code
 
-7 tests total: 1 in `src/runtime.rs`, 6 in `tests/runtime_shim.rs`. The integration tests share a
+The table below is generated from the tests themselves, out of the doc comment each one carries, so
+it cannot fall out of step with them. `scripts/test_inventory.py --check` fails the documentation
+build if it has.
+
+One test lives in `src/runtime/tests.rs` and the rest in `tests/runtime_shim.rs`. The integration tests share a
 `run_program(name, body)` helper that writes `body` as the contents of `main()`, compiles it with
 `clang -std=c99 -O0 -Wall -Wextra -Werror` linked against `SHIM_OBJECT`, runs the resulting binary,
 and returns its captured stdout as a `String`.
 
-| # | Test | Input | Expected output |
-|---|------|-------|------------------|
-| 1 | `the_shim_object_exists` (`src/runtime.rs`) | `shim_object()` (path from build script) | `.is_file() == true` |
-| 2 | `print_int_covers_the_whole_int_range` | `print_int(0)`, `(-1)`, `(1)`, `(2147483647)`, `(-2147483647 - 1)`, each followed by `\n` | Stdout: `"0\n-1\n1\n2147483647\n-2147483648\n"` |
-| 3 | `print_int_prints_digits_in_order` | `print_int(1024); print_char(' '); print_int(-9070);` | Stdout: `"1024 -9070"` |
-| 4 | `print_char_writes_one_byte` | `print_char('a')`, `'\t'`, `'Z'`, `'\n'`, `'0'` | Stdout: `"a\tZ\n0"` |
-| 5 | `print_string_writes_up_to_the_terminator` | `print_string("")`, `"hello"`, `""`, `" line\nnext\n"`, `""` (interleaved empties) | Stdout: `"hello line\nnext\n"` |
-| 6 | `output_is_unbuffered_and_in_call_order` | Interleaved `print_string`/`print_int`/`print_char` for `n=42` then `m=-42` | Stdout: `"n=42\nm=-42\n"` |
-| 7 | `the_shim_compiles_without_warnings` | `clang -std=c99 -O0 -Wall -Wextra -c runtime/shim.c` | Exit success; stderr == `""` (no warnings) |
+<!-- inventory: src/runtime/tests.rs, tests/runtime_shim.rs -->
+| # | Test | What it pins |
+| --- | --- | --- |
+| 1 | `the_shim_object_exists` | The build script produced the object, so anything linking against it has a file to link. |
+| 2 | `print_int_covers_the_whole_int_range` | `print_int` prints decimal, including at the boundaries of the range `int` can hold. |
+| 3 | `print_int_prints_digits_in_order` | Multi-digit values print their digits in the right order, not reversed. |
+| 4 | `print_char_writes_one_byte` | `print_char` writes exactly one byte, control characters included. |
+| 5 | `print_string_writes_up_to_the_terminator` | `print_string` writes every byte up to the terminator, and nothing for an empty string. |
+| 6 | `output_is_unbuffered_and_in_call_order` | The three functions interleave in call order, because nothing is buffered. |
+| 7 | `the_shim_compiles_without_warnings` | The shim compiles clean under `-Wall -Wextra`, independently of how the build script is configured — a warning-free build is a property of the source, not of one command line. |
+<!-- end inventory -->
 
 ## Actual Outputs
 
-Executed as part of `cargo test --lib` (test 1) and `cargo test --test runtime_shim` (tests 2–7);
-full unedited capture in `reports/unit_tests/cargo_test_output.txt`:
+Every test in the table above passed, with no failures, and both lint gates — `cargo fmt --check`
+and `cargo clippy --all-targets -- -D warnings` — were clean.
 
-```
-test runtime::tests::the_shim_object_exists ... ok
-
-     Running tests/runtime_shim.rs
-test the_shim_compiles_without_warnings ... ok
-test output_is_unbuffered_and_in_call_order ... ok
-test print_char_writes_one_byte ... ok
-test print_int_prints_digits_in_order ... ok
-test print_int_covers_the_whole_int_range ... ok
-test print_string_writes_up_to_the_terminator ... ok
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.12s
-```
-
-**Result: all 7 tests passed.** No failures. The 1.12s wall time for the 6 integration tests
-reflects that each one genuinely invokes `clang` to compile and link a fresh binary and then
-executes it — this is real compiled-code execution against the actual toolchain on Sidharth's
-machine (see `reports/unit_tests/00-environment.md` for the exact `clang`/Xcode versions), not a
-simulation. `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` reported no
-violations against `src/runtime.rs` or `tests/runtime_shim.rs` (clippy does not lint `runtime/
-shim.c`, since it is C, not Rust; its own warning-cleanliness is instead covered directly by test 7
-above).
+The complete, unedited output of that run is checked in beside this report as
+[`evidence/cargo-test.txt`](evidence/cargo-test.txt), and the versions of everything it was run with
+are in [`evidence/environment.txt`](evidence/environment.txt). Both are regenerated by
+`scripts/test-evidence.sh`, so this report can be re-verified against the code rather than trusted.

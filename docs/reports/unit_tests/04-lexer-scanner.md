@@ -11,7 +11,7 @@ and error recovery.
 
 ## Date
 
-2026-08-23
+2026-09-16
 
 ## Engineers
 
@@ -108,109 +108,77 @@ bad escape), `skip_line_comment`/`skip_block_comment` (including the unterminate
 `unsupported_punctuation` (every one of the 5 punctuation bytes this subset's grammar has no token
 for at all: `# ? : ^ ~`, each with its own explanatory note tested in
 `unsupported_punctuation_says_what_to_do_instead`). The two stated invariants (termination,
-always-`Eof`) are tested directly rather than only implied by passing example tests. The one
-deliberate gap: true fuzz testing (`cargo-fuzz` against arbitrary byte streams over long,
-minutes-long runs) is called out in `AGENTS.md`/`docs/dive-deep/testing.md` as a Phase 5
-deliverable and is not yet wired up in this repo (confirmed absent: no `fuzz/` directory exists, and
-`cargo fuzz` is not installed in the current environment — see
-`reports/unit_tests/00-environment.md`); the `arbitrary_bytes_terminate` test here is a lightweight,
-deterministic stand-in that exercises the same termination property over a fixed, unmemorized input
-rather than program-generated adversarial input.
+always-`Eof`) are tested directly rather than only implied by passing example tests.
+
+The `arbitrary_bytes_terminate` test here is a deterministic version of the same property over a
+fixed input. The generated version of it is `fuzz/fuzz_targets/lex.rs`, which mutates its input for
+as long as it is allowed to run and asserts the same two invariants plus a third — that every span
+points inside the input — and which is reported in
+[14 — The Differential Harness](14-differential-harness.md) alongside the rest of the machinery that
+is test code rather than compiler code. The two are complementary: the unit test runs in
+milliseconds on every change, and the fuzz target runs for fifteen minutes when someone asks it
+to.
 
 ## Automated Test Code
 
-35 tests total: 34 in `src/lexer/mod.rs` under `#[cfg(test)] mod tests`, plus 1 in
-`tests/lexer_snapshots.rs`.
+The tests live in `src/lexer/tests.rs`, the scanner module's own test file, plus one whole-stream
+snapshot in `tests/lexer_snapshots.rs`. The table is generated from the tests themselves, so it
+cannot fall out of step with them; `scripts/test_inventory.py --check` fails the documentation build
+if it has.
 
-| # | Test | Input | Expected output |
-|---|------|-------|------------------|
-| 1 | `keywords_lex_as_keywords` | Each of `Keyword::ALL`'s spelling | `TokenKind::Keyword(that_keyword)` |
-| 2 | `keyword_prefixes_lex_as_identifiers` | `"integer"`, `"if_"`, `"_int"`, `"returns"` | Each an `Ident` of that text |
-| 3 | `identifiers_lex_as_identifiers` | `"x"`, `"_"`, `"_x9"`, `"camelCase"`, `"SHOUT"`, `"a1b2"` | `Ident` of same text |
-| 4 | `integer_literals_decode_by_base` | `"0","7","42","0x0","0xff","0XFF","0755","010","2147483647"` | `0,7,42,0,255,255,493,8,i32::MAX` |
-| 5 | `character_literals_decode_to_one_byte` | `'a'`, `' '`, `'\n'`, `'\0'`, `'\\'`, `'\''`, `'"'` | `CharLit(b'a')`, `(b' ')`, `(b'\n')`, `(0)`, `(b'\\')`, `(b'\'')`, `(b'"')` |
-| 6 | `every_escape_decodes` | Each `(letter, byte)` in `ESCAPES` as `'\<letter>'` | `CharLit(byte)` |
-| 7 | `string_literals_store_decoded_bytes` | `""`, `"hi"`, `"a\tb\0c"`, `"quote:\" done"` | Empty vec; `b"hi"`; `[a,\t,b,0,c]`; `b"quote:\" done"` |
-| 8 | `quotes_nest_inside_the_other_literal_form` | `"it's"` | `StrLit(b"it's")` |
-| 9 | `operators_and_punctuators_lex_as_themselves` | All 24 fixed operator/punctuator spellings | Matching `TokenKind` each |
-| 10 | `maximal_munch_splits_operators_the_documented_way` | `a<=b`, `a<-b`, `a++ +b`, `a+++b`, `a---b`, `a==b`, `a= =b` | Documented splits (see methodology) |
-| 11 | `empty_input_is_only_eof` | `""` | `[]` (no tokens besides implicit Eof) |
-| 12 | `whitespace_is_not_a_token` | `" \t\r\n  ;  \n"` | `[Semi]` |
-| 13 | `comments_are_skipped_wherever_they_appear` | 4 comment placements around `;`/`a+b` | Comments produce no tokens |
-| 14 | `line_comment_at_eof_without_a_newline` | `";// trailing"`, `"// only a comment"` | `[Semi]`; `[]` |
-| 15 | `block_comments_do_not_nest` | `"/* outer /* inner */ ;"` | `[Semi]` (closes at first `*/`) |
-| 16 | `a_lone_slash_is_division` | `"a / b"` | `[Ident(a), Slash, Ident(b)]` |
-| 17 | `every_token_reports_its_line_and_column` | `"int x;\nif (x)\n\treturn 0;\n"` | Exact pinned dump string (line:col-line:col per token) |
-| 18 | `dump_column_widens_for_large_line_numbers` | 10,000 blank lines + `"int x;\n"` | Dump columns all aligned; alignment column > 16 |
-| 19 | `a_tab_advances_the_column_by_one` | `"\t\t;"` | First token's column == 3 |
-| 20 | `crlf_lexes_the_same_as_lf` | CRLF vs LF two-line fixture | Same token kinds; CRLF 4th token on line 2 |
-| 21 | `invalid_utf8_is_a_diagnostic_not_a_panic` | `b"int \xff x;"` | 1 diagnostic containing `"byte 0xff"`; stream still ends `Eof` |
-| 22 | `arbitrary_bytes_terminate` | All 256 byte values, cycled to 4096 bytes | Stream ends `Eof` (no panic, no hang) |
-| 23 | `each_malformed_construct_has_its_own_diagnostic` | 17 malformed inputs (see methodology) | Each: exactly 1 diagnostic, exact message, span == whole construct |
-| 24 | `unsupported_punctuation_is_named_not_called_stray` | `& \| # ? : ^ ~` | Each: `"unsupported in this C subset: '<char>'"` |
-| 25 | `unsupported_punctuation_says_what_to_do_instead` | `a & b`, `a \| b`, `#include...`, `a ? b : c`, `a ^ b` | Notes: "did you mean '&&'?" etc. (5 distinct notes) |
-| 26 | `integer_overflow_explains_the_limit` | `"2147483648"` | Note: `"the maximum is 2147483647; write INT_MIN as -2147483647 - 1"` |
-| 27 | `a_single_error_does_not_cascade` | `'\q'`, `0x`, `'ab'`, `"unterminated` | Each: exactly 1 diagnostic |
-| 28 | `scanning_resumes_on_the_line_after_an_unterminated_literal` | `"\"oops\nint x;\n"` | 1 diagnostic; tokens `[StrLit("oops"), Int, Ident(x), Semi, Eof]` |
-| 29 | `an_unterminated_block_comment_runs_to_the_end_of_file` | `"int x;\n/* oops\nint y;\n"` | 1 diagnostic; tokens `[Int, Ident(x), Semi, Eof]` (rest swallowed) |
-| 30 | `several_errors_are_reported_in_source_order` | 4-error fixture (bad hex, empty char, stray `@`, unterminated string) | 4 messages in order; span offsets strictly increasing |
-| 31 | `a_file_of_stray_characters_terminates` | `"@$#\`@$#\`"` (8 stray chars) | 8 diagnostics; token stream is `[Eof]` only |
-| 32 | `repeated_errors_still_terminate` | `"'\n'\n'\n'\n\"\n\"\n\"\n"` (7 unterminated literals) | Non-empty diagnostics; stream ends `Eof` |
-| 33 | `a_trailing_backslash_does_not_overrun` | `'\`, `"\`, `'`, `"` (backslash/quote at very EOF) | Each: exactly 1 diagnostic; stream ends `Eof` |
-| 34 | `spans_slice_back_to_the_source_text` | `"int total = 0xff;"` | Every token's span is a valid slice of source; literal token's span == `"0xff"` |
-| 35 (integration) | `representative_program_token_stream` (`tests/lexer_snapshots.rs`) | ~35-line program touching every lexable construct (both comment forms, all 3 int bases, char/string escapes, every operator/punctuator) | Diagnostics empty; full token-stream dump matches pinned `insta` snapshot |
+<!-- inventory: src/lexer/tests.rs, tests/lexer_snapshots.rs -->
+| # | Test | What it pins |
+| --- | --- | --- |
+| 1 | `keywords_lex_as_keywords` | Every keyword lexes as itself. |
+| 2 | `keyword_prefixes_lex_as_identifiers` | A keyword with anything attached is one identifier, not a keyword plus leftovers. |
+| 3 | `identifiers_lex_as_identifiers` | Identifiers may start with a letter or underscore and continue with digits. |
+| 4 | `integer_literals_decode_by_base` | Decimal, hex, and octal literals decode to the same value the base implies. |
+| 5 | `character_literals_decode_to_one_byte` | A character literal decodes to the one byte it denotes, escape or not. |
+| 6 | `every_escape_decodes` | Every escape in the table decodes inside a character literal. |
+| 7 | `string_literals_store_decoded_bytes` | A string literal stores decoded bytes, so nothing downstream re-parses escapes. |
+| 8 | `quotes_nest_inside_the_other_literal_form` | A string literal may contain an unescaped single quote, and vice versa. |
+| 9 | `operators_and_punctuators_lex_as_themselves` | Every operator and punctuator lexes as its own token. |
+| 10 | `maximal_munch_splits_operators_the_documented_way` | Multi-character operators win over their prefixes, and a longer run splits greedily. |
+| 11 | `empty_input_is_only_eof` | An empty input is just the end of the input. |
+| 12 | `whitespace_is_not_a_token` | Whitespace separates tokens without becoming one. |
+| 13 | `comments_are_skipped_wherever_they_appear` | Both comment forms are skipped, including between a token and its operator. |
+| 14 | `line_comment_at_eof_without_a_newline` | A comment running to the end of a file with no trailing newline still ends cleanly. |
+| 15 | `block_comments_do_not_nest` | A block comment does not nest: the first `*/` closes it. |
+| 16 | `a_lone_slash_is_division` | A `/` that does not begin a comment is division. |
+| 17 | `every_token_reports_its_line_and_column` | The dump of a multi-line fixture, which pins the line and column of every token. |
+| 18 | `dump_column_widens_for_large_line_numbers` | The position column widens with the file, so a dump of a long program still lines up. |
+| 19 | `a_tab_advances_the_column_by_one` | A tab advances the column by one, so the token after it starts one column further on. |
+| 20 | `crlf_lexes_the_same_as_lf` | CRLF input produces the same tokens, and the same line numbers, as LF input. |
+| 21 | `invalid_utf8_is_a_diagnostic_not_a_panic` | Invalid UTF-8 is a diagnostic, not a panic, and the scan still reaches the end. |
+| 22 | `arbitrary_bytes_terminate` | A file of arbitrary bytes still terminates and still ends in `Eof`. |
+| 23 | `each_malformed_construct_has_its_own_diagnostic` | Every malformed-input path reports its own diagnostic, spanning the whole construct. |
+| 24 | `unsupported_punctuation_is_named_not_called_stray` | Punctuation of real C that this grammar has no token for is named as unsupported rather than as a stray byte, in the same words the parser uses for the constructs it catches. |
+| 25 | `unsupported_punctuation_says_what_to_do_instead` | Each unsupported character says what to reach for instead. |
+| 26 | `integer_overflow_explains_the_limit` | An over-large literal says what the limit is and how to write `INT_MIN` within it. |
+| 27 | `a_single_error_does_not_cascade` | One bad construct produces one diagnostic, not a cascade. |
+| 28 | `scanning_resumes_on_the_line_after_an_unterminated_literal` | An unterminated literal resynchronizes at the end of its line, so the next line still lexes. |
+| 29 | `an_unterminated_block_comment_runs_to_the_end_of_file` | An unterminated block comment resynchronizes at end of file, swallowing the rest. |
+| 30 | `a_directive_is_one_diagnostic_spanning_the_directive` | A preprocessor directive is one unsupported construct: one diagnostic whose span covers the directive, not a report for the `#` followed by more for the rest of the line. |
+| 31 | `scanning_resumes_on_the_line_after_a_directive` | Scanning resumes on the line after a directive, so the code that follows still lexes. |
+| 32 | `a_directive_continues_across_spliced_lines` | A backslash before the newline splices the next line onto the directive (C11 5.1.1.2, phase 2), so a multi-line macro is still one directive and its body is not lexed as code. |
+| 33 | `a_directive_may_be_indented_or_follow_a_comment` | A directive may follow whitespace or a comment on its own line: what matters is that no token precedes the `#` on that line (C11 6.10p2). |
+| 34 | `a_hash_after_a_token_on_its_line_is_a_single_character` | A `#` after a token on the same line is not a directive, so it is the single unsupported character and the rest of the line lexes as usual. |
+| 35 | `a_newline_inside_a_comment_does_not_start_a_directive` | A newline inside a block comment does not start a new line for a directive, because the comment is replaced by one space before directives are recognized (C11 5.1.1.2, phase 3). |
+| 36 | `a_directive_at_the_end_of_file_terminates` | A directive ending at the end of file, including one whose last line is spliced into nothing, still ends the stream in `Eof`. |
+| 37 | `several_errors_are_reported_in_source_order` | A file with several mistakes reports all of them, in source order. |
+| 38 | `a_file_of_stray_characters_terminates` | A file of nothing but stray characters terminates, reporting one error per character. |
+| 39 | `repeated_errors_still_terminate` | An error path cannot loop: repeated unterminated constructs still reach the end. |
+| 40 | `a_trailing_backslash_does_not_overrun` | A backslash at the very end of a file is an unterminated literal, not an overrun. |
+| 41 | `spans_slice_back_to_the_source_text` | Spans are byte ranges over the original source, so slicing one back out gives the token. |
+| 42 | `representative_program_token_stream` | The whole token stream, with each token's start and end position, for the program above. |
+<!-- end inventory -->
 
 ## Actual Outputs
 
-Executed as part of `cargo test --lib` and `cargo test --test lexer_snapshots` (full unedited
-capture in `reports/unit_tests/cargo_test_output.txt`):
+Every test in the table above passed, with no failures, and both lint gates — `cargo fmt --check`
+and `cargo clippy --all-targets -- -D warnings` — were clean.
 
-```
-test lexer::tests::a_file_of_stray_characters_terminates ... ok
-test lexer::tests::a_lone_slash_is_division ... ok
-test lexer::tests::a_single_error_does_not_cascade ... ok
-test lexer::tests::a_tab_advances_the_column_by_one ... ok
-test lexer::tests::a_trailing_backslash_does_not_overrun ... ok
-test lexer::tests::an_unterminated_block_comment_runs_to_the_end_of_file ... ok
-test lexer::tests::block_comments_do_not_nest ... ok
-test lexer::tests::character_literals_decode_to_one_byte ... ok
-test lexer::tests::comments_are_skipped_wherever_they_appear ... ok
-test lexer::tests::crlf_lexes_the_same_as_lf ... ok
-test lexer::tests::each_malformed_construct_has_its_own_diagnostic ... ok
-test lexer::tests::empty_input_is_only_eof ... ok
-test lexer::tests::every_escape_decodes ... ok
-test lexer::tests::every_token_reports_its_line_and_column ... ok
-test lexer::tests::identifiers_lex_as_identifiers ... ok
-test lexer::tests::integer_literals_decode_by_base ... ok
-test lexer::tests::integer_overflow_explains_the_limit ... ok
-test lexer::tests::arbitrary_bytes_terminate ... ok
-test lexer::tests::invalid_utf8_is_a_diagnostic_not_a_panic ... ok
-test lexer::tests::keywords_lex_as_keywords ... ok
-test lexer::tests::keyword_prefixes_lex_as_identifiers ... ok
-test lexer::tests::line_comment_at_eof_without_a_newline ... ok
-test lexer::tests::maximal_munch_splits_operators_the_documented_way ... ok
-test lexer::tests::operators_and_punctuators_lex_as_themselves ... ok
-test lexer::tests::quotes_nest_inside_the_other_literal_form ... ok
-test lexer::tests::repeated_errors_still_terminate ... ok
-test lexer::tests::scanning_resumes_on_the_line_after_an_unterminated_literal ... ok
-test lexer::tests::several_errors_are_reported_in_source_order ... ok
-test lexer::tests::spans_slice_back_to_the_source_text ... ok
-test lexer::tests::string_literals_store_decoded_bytes ... ok
-test lexer::tests::unsupported_punctuation_is_named_not_called_stray ... ok
-test lexer::tests::unsupported_punctuation_says_what_to_do_instead ... ok
-test lexer::tests::whitespace_is_not_a_token ... ok
-test lexer::tests::dump_column_widens_for_large_line_numbers ... ok
-
-test result: ok. (34 of these ran as part of the 142 in `unittests src/lib.rs`)
-
-     Running tests/lexer_snapshots.rs
-test representative_program_token_stream ... ok
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
-```
-
-**Result: all 35 tests passed** (34 unit tests + 1 snapshot integration test). No failures. The
-`representative_program_token_stream` snapshot compared cleanly against the checked-in
-`tests/snapshots/lexer_snapshots__representative_program_token_stream.snap` with no diff (a diff
-would have failed the test, not merely printed a warning — `insta` fails the assertion on any
-mismatch unless explicitly reviewed and re-accepted via `cargo insta accept`). `cargo clippy
---all-targets -- -D warnings` and `cargo fmt --check` reported no violations against either file.
+The complete, unedited output of that run is checked in beside this report as
+[`evidence/cargo-test.txt`](evidence/cargo-test.txt), and the versions of everything it was run with
+are in [`evidence/environment.txt`](evidence/environment.txt). Both are regenerated by
+`scripts/test-evidence.sh`, so this report can be re-verified against the code rather than trusted.

@@ -14,7 +14,7 @@ later pass; its tests build trees by hand.
 
 ## Date
 
-2026-08-23
+2026-09-16
 
 ## Engineers
 
@@ -101,52 +101,40 @@ since span computation is parser logic, not AST logic.
 
 ## Automated Test Code
 
-All 15 tests live in `src/ast.rs` under `#[cfg(test)] mod tests`, using a hand-rolled `Builder`
-helper (assigns `NodeId`s the way the parser would) rather than the real parser, so this unit is
-tested independently of the parser.
+The tests live in `src/ast/tests.rs`, the module's own test file, and use a hand-rolled `Builder`
+helper that assigns node identities the way the parser would, rather than the real parser — so this
+unit is tested independently of the one that builds its values.
 
-| # | Test | Input | Expected output |
-|---|------|-------|------------------|
-| 1 | `ids_are_handed_out_in_order` | Fresh `NodeIds`, `next_id()` × 3 | `NodeId(0)`, `NodeId(1)`, third's `.index() == 2` |
-| 2 | `node_ids_are_unique_across_a_program` | `nodes(&twice())` (hand-built `int twice(int n){return n*2;}`) | `nodes.len() == 6`; all 6 ids distinct |
-| 3 | `the_ast_has_no_interior_mutability` | `Program`, `Stmt`, `Expr` types | All satisfy `T: Sync` (compiles) |
-| 4 | `the_dump_is_deterministic` | `dump(&twice(), Hidden)` × 2, `dump(&twice(), Shown)` × 2 | Each pair byte-equal |
-| 5 | `a_hand_built_tree_dumps` | `twice()` tree, `Spans::Hidden` | Exact string: `(program\n  (func-def int twice\n    (params\n      (param int n))\n    (block\n      (return\n        (binary *\n          (ident n)\n          (int-lit 2))))))\n` |
-| 6 | `the_dump_ends_with_a_newline` | `dump(&twice(), Hidden)` | Ends with `)\n` |
-| 7 | `shown_spans_annotate_only_the_nodes_that_have_them` | Global var `int n = 1;`, `Spans::Shown` | Exact string with `@0..1` on identified nodes, none on `(program` grouping line |
-| 8 | `an_expression_dumps_on_its_own` | `dump_expression(&int(7), Hidden)` | `"(int-lit 7)\n"` |
-| 9 | `every_form_dumps_to_a_distinct_line` | One instance each of all `StmtKind`/`ExprKind` variants (14 total: 4+10, plus Block/If/While/For/LocalVar = 19 head lines) | All head lines pairwise distinct (`HashSet` len == list len) |
-| 10 | `literals_dump_as_they_were_written` | `IntLit(-5)`, `CharLit('a')`, `CharLit('\n')`, `StrLit("a\tb")`, `StrLit("")` | `"(int-lit -5)\n"`, `"(char-lit 'a')\n"`, `"(char-lit '\\n')\n"`, `"(str-lit \"a\\tb\")\n"`, `"(str-lit \"\")\n"` |
-| 11 | `an_item_reports_its_own_identity` | `FuncDef`, `FuncDecl`, `GlobalVar` items, all built with `span = ANYWHERE` | 3 distinct ids; all `.span() == ANYWHERE` |
-| 12 | `types_spell_themselves` | `int`, `char`, `void`, `int[3]`, `char[]` `TypeSpec`s | `.to_string()` == `"int"`, `"char"`, `"void"`, `"int[3]"`, `"char[]"` respectively |
-| 13 | `only_arrays_are_arrays` | scalar `int`, `int[3]`, unsized `int[]` | `is_array()` == `false`, `true`, `true` |
-| 14 | `operators_spell_themselves_distinctly` | `BinOp::ALL`, `UnOp::ALL`, `IncDec::ALL`, `BaseType::ALL` spellings | No empty spellings; no duplicates within each set |
-| 15 | `every_operator_variant_is_listed` | Every variant in each `ALL` constant, matched exhaustively | Compiles (no missing-variant compile error) |
+The table below is generated from the tests themselves, out of the doc comment each one carries, so
+it cannot fall out of step with them. `scripts/test_inventory.py --check` fails the documentation
+build if it has.
+
+<!-- inventory: src/ast/tests.rs -->
+| # | Test | What it pins |
+| --- | --- | --- |
+| 1 | `ids_are_handed_out_in_order` | Ids are handed out in order and never repeat. |
+| 2 | `node_ids_are_unique_across_a_program` | Walking a tree finds every node once. Phase 3 keys its annotations by these ids, so a collision would quietly give two nodes the same type. |
+| 3 | `the_ast_has_no_interior_mutability` | The AST carries no interior mutability, which is what ADR 0004 forbids. |
+| 4 | `the_dump_is_deterministic` | The same tree dumps to the same bytes every time, which is what a snapshot depends on. |
+| 5 | `a_hand_built_tree_dumps` | A hand-built tree round-trips through the dumper, indented one level per depth. |
+| 6 | `the_dump_ends_with_a_newline` | A dump is a file's worth of output, so it ends with a newline. |
+| 7 | `shown_spans_annotate_only_the_nodes_that_have_them` | Showing spans annotates each node that has one, and leaves the grouping lines bare. |
+| 8 | `an_expression_dumps_on_its_own` | One expression dumps on its own, without a program built around it to hold it. |
+| 9 | `every_form_dumps_to_a_distinct_line` | Every statement and expression form has a line of its own in the dump, carrying its own id and span, and no two forms share one. |
+| 10 | `literals_dump_as_they_were_written` | A literal dumps in the form it was written, escapes and all, through the same table the lexer decoded it with. |
+| 11 | `an_item_reports_its_own_identity` | An item reports the identity and extent of whichever form it is. |
+| 12 | `types_spell_themselves` | A type spells itself the way it was declared. |
+| 13 | `only_arrays_are_arrays` | The three type shapes are distinguishable, and only an array claims to be one. |
+| 14 | `operators_spell_themselves_distinctly` | Every operator spells itself as source text, and no two share a spelling within a set. |
+| 15 | `every_operator_variant_is_listed` | The `ALL` lists are complete: a variant added without being listed fails to compile here. |
+<!-- end inventory -->
 
 ## Actual Outputs
 
-Executed as part of `cargo test --lib` on Sidharth's development machine (full unedited capture in
-`reports/unit_tests/cargo_test_output.txt`):
+Every test in the table above passed, with no failures, and both lint gates — `cargo fmt --check`
+and `cargo clippy --all-targets -- -D warnings` — were clean.
 
-```
-test ast::tests::ids_are_handed_out_in_order ... ok
-test ast::tests::every_operator_variant_is_listed ... ok
-test ast::tests::only_arrays_are_arrays ... ok
-test ast::tests::an_expression_dumps_on_its_own ... ok
-test ast::tests::the_ast_has_no_interior_mutability ... ok
-test ast::tests::shown_spans_annotate_only_the_nodes_that_have_them ... ok
-test ast::tests::literals_dump_as_they_were_written ... ok
-test ast::tests::types_spell_themselves ... ok
-test ast::tests::a_hand_built_tree_dumps ... ok
-test ast::tests::the_dump_is_deterministic ... ok
-test ast::tests::the_dump_ends_with_a_newline ... ok
-test ast::tests::node_ids_are_unique_across_a_program ... ok
-test ast::tests::operators_spell_themselves_distinctly ... ok
-test ast::tests::an_item_reports_its_own_identity ... ok
-test ast::tests::every_form_dumps_to_a_distinct_line ... ok
-
-test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
-```
-
-**Result: all 15 tests passed.** No failures. `cargo clippy --all-targets -- -D warnings` reported
-no lint violations against this file, and `cargo fmt --check` reported no formatting drift.
+The complete, unedited output of that run is checked in beside this report as
+[`evidence/cargo-test.txt`](evidence/cargo-test.txt), and the versions of everything it was run with
+are in [`evidence/environment.txt`](evidence/environment.txt). Both are regenerated by
+`scripts/test-evidence.sh`, so this report can be re-verified against the code rather than trusted.

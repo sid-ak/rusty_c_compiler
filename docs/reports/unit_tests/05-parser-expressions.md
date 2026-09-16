@@ -14,7 +14,7 @@ lvalue-shape checking — is fully contained in this one file.
 
 ## Date
 
-2026-08-23
+2026-09-16
 
 ## Engineers
 
@@ -109,47 +109,39 @@ with statement-level recovery after a syntax error (e.g. resynchronization), sin
 
 ## Automated Test Code
 
-All 12 tests live in `src/parser/expr.rs` under `#[cfg(test)] mod tests`, using two shared helpers:
+The table below is generated from the tests themselves, out of the doc comment each one carries, so
+it cannot fall out of step with them. `scripts/test_inventory.py --check` fails the documentation
+build if it has.
+
+The tests live in `src/parser/expr/tests.rs`, the module's own test file, and use two shared
+helpers:
 `shape(source)` (lex + parse one expression, assert it lexed/parsed cleanly and consumed the whole
 input, return its one-line AST dump) and `errors(source)` (lex + parse, return the sorted diagnostic
 messages).
 
-| # | Test | Input | Expected output |
-|---|------|-------|------------------|
-| 1 | `primaries_parse_to_themselves` | `42`, `0xff`, `'a'`, `"hi"`, `total` | `(int-lit 42)`, `(int-lit 255)`, `(char-lit 'a')`, `(str-lit "hi")`, `(ident total)` |
-| 2 | `precedence_and_associativity_match_c` | 16 cases incl. `1+2*3`, `1*2+3`, `a=b=c`, `-x*y`, `a||b&&c`, `a<b==c<d`, `-f(x)[i]`, `1++ +2` | Exact tree-shape string per case (see source; e.g. `1+2*3` → `(binary + (int-lit 1) (binary * (int-lit 2) (int-lit 3)))`) |
-| 3 | `prefix_operators_are_right_associative` | `- -x`, `!!a`, `++--a` | `(unary - (unary - (ident x)))`, `(unary ! (unary ! (ident a)))`, `(unary ++ (unary -- (ident a)))` |
-| 4 | `postfix_operators_chain` | `a[i]++`, `f(x)[0]`, `a[i][j]`, `a--` | Nested `postfix`/`index`/`call` trees per case |
-| 5 | `call_arguments_parse_at_assignment_precedence` | `f()`, `f(a, b = c)`, `f(a + b, c)` | `(call (ident f) (args))`; args include an `assign` node for the 2nd; args include a `binary +` for the 1st |
-| 6 | `parentheses_leave_no_trace` | `((((1))))` vs `1`; `(a+b)*c`; `(a) = 1` | First pair: identical dump string. `(a+b)*c` → `(binary * (binary + a b) c)`. `(a) = 1` → `(assign (ident a) (int-lit 1))` |
-| 7 | `only_syntactic_lvalues_may_be_assigned_to` | Rejects: `1 = 2`, `f() = 1`, `(a + b) = 1`, `a++ = 1`. Accepts: `a = 1`, `a[i] = 1`, `(a) = 1`, `(a[i]) = 1` | Rejects: `["expression is not assignable"]` each. Accepts: parse without error |
-| 8 | `operators_spelled_as_two_tokens_are_named` | `a += b`, `-=`, `*=`, `/=`, `%=`, `a << b`, `a >> b` | `["unsupported in this C subset: '+='"]` etc., one per operator |
-| 9 | `separated_operators_are_not_mistaken_for_a_pair` | `a < -b`, `a > + b` | `(binary < a (unary - b))`; `(binary > a (unary + b))` (not misread as `<-`/`>+`) |
-| 10 | `a_missing_operand_names_what_was_wanted` | `1 +`, `a[i][`, `*x` | `["expected an expression, found end of file"]` (×2), `["expected an expression, found '*'"]` |
-| 11 | `every_binary_operator_parses` | Each of `BinOp::ALL` as `a <op> b` | `(binary <op> (ident a) (ident b))` for all 13 |
-| 12 | `every_unary_operator_parses` | Each of `UnOp::ALL` as `<op>a`, each of `IncDec::ALL` as `a<op>` | `(unary <op> (ident a))` ×5; `(postfix <op> (ident a))` ×2 |
+<!-- inventory: src/parser/expr/tests.rs -->
+| # | Test | What it pins |
+| --- | --- | --- |
+| 1 | `primaries_parse_to_themselves` | Every primary form parses to itself. |
+| 2 | `precedence_and_associativity_match_c` | Precedence and associativity, asserted on the tree rather than on a result: `1+2*3 == 7` would also hold if precedence were wrong in a way that cancelled out. |
+| 3 | `prefix_operators_are_right_associative` | Prefix operators are right-associative, so they nest outermost-first. |
+| 4 | `postfix_operators_chain` | The postfix operators chain in any combination, from one loop with no case for either. |
+| 5 | `call_arguments_parse_at_assignment_precedence` | Call arguments parse at assignment precedence, so an assignment inside one is an argument rather than a separator. |
+| 6 | `parentheses_leave_no_trace` | Parentheses group and then vanish, so a deeply parenthesized expression is the same tree as the expression inside it. |
+| 7 | `only_syntactic_lvalues_may_be_assigned_to` | Only a variable or an array element can be written to; anything else is not an assignment that is wrong, it is not an assignment. |
+| 8 | `operators_spelled_as_two_tokens_are_named` | An operator this subset omits that lexes as two tokens is named, rather than reported as a stray second half. |
+| 9 | `separated_operators_are_not_mistaken_for_a_pair` | The pair is only recognized when the two halves touch, so spaced-out real operators still parse as themselves. |
+| 10 | `a_missing_operand_names_what_was_wanted` | An expression that cannot be parsed says what it wanted and what it found. |
+| 11 | `every_binary_operator_parses` | Every binary operator in the AST is reachable from source, so none is unreachable in practice while still being representable. |
+| 12 | `every_unary_operator_parses` | Every prefix and postfix operator is reachable from source too. |
+<!-- end inventory -->
 
 ## Actual Outputs
 
-Executed as part of `cargo test --lib` (full unedited capture in
-`reports/unit_tests/cargo_test_output.txt`):
+Every test in the table above passed, with no failures, and both lint gates — `cargo fmt --check`
+and `cargo clippy --all-targets -- -D warnings` — were clean.
 
-```
-test parser::expr::tests::a_missing_operand_names_what_was_wanted ... ok
-test parser::expr::tests::call_arguments_parse_at_assignment_precedence ... ok
-test parser::expr::tests::only_syntactic_lvalues_may_be_assigned_to ... ok
-test parser::expr::tests::parentheses_leave_no_trace ... ok
-test parser::expr::tests::every_unary_operator_parses ... ok
-test parser::expr::tests::postfix_operators_chain ... ok
-test parser::expr::tests::operators_spelled_as_two_tokens_are_named ... ok
-test parser::expr::tests::prefix_operators_are_right_associative ... ok
-test parser::expr::tests::separated_operators_are_not_mistaken_for_a_pair ... ok
-test parser::expr::tests::primaries_parse_to_themselves ... ok
-test parser::expr::tests::every_binary_operator_parses ... ok
-test parser::expr::tests::precedence_and_associativity_match_c ... ok
-
-test result: ok. (12 of these ran as part of the 142 in `unittests src/lib.rs`)
-```
-
-**Result: all 12 tests passed.** No failures. `cargo clippy --all-targets -- -D warnings` and
-`cargo fmt --check` reported no violations against this file.
+The complete, unedited output of that run is checked in beside this report as
+[`evidence/cargo-test.txt`](evidence/cargo-test.txt), and the versions of everything it was run with
+are in [`evidence/environment.txt`](evidence/environment.txt). Both are regenerated by
+`scripts/test-evidence.sh`, so this report can be re-verified against the code rather than trusted.
