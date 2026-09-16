@@ -87,8 +87,16 @@ Covered: every comparison axis, injected wrong on purpose; every outcome the har
 provoked end to end; the contents of a failure report; the generator's determinism, its variety, its
 staying inside the subset, and its staying inside defined behavior.
 
-Not covered here: whether the corpus is *wide* enough for agreement to mean much. That is the
-coverage matrix's job, and it is recorded in `tests/programs/COVERAGE.md`.
+Two things are deliberately not covered by a test here:
+
+- Whether the corpus is *wide* enough for agreement to mean much. That is the coverage matrix's job,
+  and it is recorded in `tests/programs/COVERAGE.md`.
+- Whether the generator's work budget is low enough that no program it writes runs past the
+  harness's limit. That is not a property a single test can assert — the budget is an estimate, and
+  what makes it right is that a long run finds nothing. The evidence is the soak recorded in
+  [the acceptance report](../acceptance.md), and the test that would notice if it stopped being
+  true is `generated_programs_agree_with_clang` itself, which fails on a timeout rather than
+  tolerating one.
 
 ## Automated Test Code
 
