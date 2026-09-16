@@ -42,6 +42,7 @@ fn each_debug_flag_selects_its_stage() {
         ("--dump-ast", Stage::Ast),
         ("--dump-annotations", Stage::Annotations),
         ("--check", Stage::Check),
+        ("-c", Stage::Object),
         ("-S", Stage::Assembly),
     ];
 

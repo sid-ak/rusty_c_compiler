@@ -22,6 +22,8 @@ pub enum Stage {
     Annotations,
     /// Stop after code generation, leaving assembly (`-S`).
     Assembly,
+    /// Stop after assembling, leaving an object file (`-c`).
+    Object,
     /// Run the whole pipeline, assemble, and link an executable.
     Executable,
 }
@@ -58,6 +60,14 @@ pub struct Options {
     #[arg(short = 'S', group = "stop_after")]
     pub assembly_only: bool,
 
+    /// Stop after assembling, leaving an object file rather than an executable.
+    #[arg(short = 'c', group = "stop_after")]
+    pub object_only: bool,
+
+    /// Also write the generated assembly to this path, whatever else is produced.
+    #[arg(long, value_name = "FILE")]
+    pub emit_asm_to: Option<PathBuf>,
+
     /// Keep the intermediate files the driver would otherwise delete.
     #[arg(long)]
     pub keep_temps: bool,
@@ -76,6 +86,8 @@ impl Options {
             Stage::Check
         } else if self.assembly_only {
             Stage::Assembly
+        } else if self.object_only {
+            Stage::Object
         } else {
             Stage::Executable
         }
@@ -92,6 +104,8 @@ impl Options {
             dump_annotations: stage == Stage::Annotations,
             check: stage == Stage::Check,
             assembly_only: stage == Stage::Assembly,
+            object_only: stage == Stage::Object,
+            emit_asm_to: None,
             keep_temps: false,
         }
     }

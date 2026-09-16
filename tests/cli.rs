@@ -149,3 +149,254 @@ fn corpus(directory: &str) -> Vec<std::path::PathBuf> {
 
     paths
 }
+
+/// A directory for one driver test's files, empty to begin with.
+fn driver_scratch(name: &str) -> std::path::PathBuf {
+    let directory = Path::new(env!("OUT_DIR")).join("driver-tests").join(name);
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).expect("could not create the scratch directory");
+
+    directory
+}
+
+/// A small program that prints through the runtime shim.
+const HELLO: &str =
+    "void print_string(char s[]);\nint main(void) { print_string(\"hi\"); return 0; }\n";
+
+/// Writes `source` into `directory` and returns its path.
+fn write_program(directory: &Path, source: &str) -> std::path::PathBuf {
+    let path = directory.join("program.c");
+    std::fs::write(&path, source).expect("could not write the program");
+
+    path
+}
+
+/// `rustycc program.c -o program && ./program` works, which is the contract the proposal states.
+#[test]
+fn compiling_and_running_a_program_works_end_to_end() {
+    let directory = driver_scratch("end-to-end");
+    let source = write_program(&directory, HELLO);
+    let binary = directory.join("program");
+
+    let built = Command::new(RUSTYCC)
+        .arg(&source)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "compiling failed: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    assert!(binary.exists(), "-o was not respected");
+
+    let run = Command::new(&binary).output().unwrap();
+
+    assert!(run.status.success());
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "hi");
+}
+
+/// `-S` writes assembly and produces no binary.
+#[test]
+fn dash_s_emits_assembly_and_no_binary() {
+    let directory = driver_scratch("dash-s");
+    let source = write_program(&directory, HELLO);
+    let assembly = directory.join("program.s");
+
+    let built = Command::new(RUSTYCC)
+        .arg(&source)
+        .arg("-S")
+        .arg("-o")
+        .arg(&assembly)
+        .output()
+        .unwrap();
+
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    assert!(assembly.exists(), "the assembly was not written");
+
+    let text = std::fs::read_to_string(&assembly).expect("could not read the assembly");
+    assert!(text.contains("_main:"), "got: {text}");
+    assert!(
+        !directory.join("program").exists(),
+        "a binary was produced anyway"
+    );
+}
+
+/// `-c` produces an object file rather than an executable.
+#[test]
+fn dash_c_emits_an_object_file() {
+    let directory = driver_scratch("dash-c");
+    let source = write_program(&directory, HELLO);
+    let object = directory.join("program.o");
+
+    let built = Command::new(RUSTYCC)
+        .arg(&source)
+        .arg("-c")
+        .arg("-o")
+        .arg(&object)
+        .output()
+        .unwrap();
+
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    assert!(object.exists(), "the object file was not written");
+}
+
+/// `--emit-asm-to` writes the assembly to the given path while still producing the program.
+#[test]
+fn emit_asm_to_writes_the_assembly_alongside_the_binary() {
+    let directory = driver_scratch("emit-asm-to");
+    let source = write_program(&directory, HELLO);
+    let binary = directory.join("program");
+    let assembly = directory.join("kept.s");
+
+    let built = Command::new(RUSTYCC)
+        .arg(&source)
+        .arg("-o")
+        .arg(&binary)
+        .arg("--emit-asm-to")
+        .arg(&assembly)
+        .output()
+        .unwrap();
+
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    assert!(assembly.exists(), "the assembly was not written");
+    assert!(binary.exists(), "the binary was not produced");
+}
+
+/// Intermediate files are gone once the run ends, and kept when the caller asks.
+///
+/// `TMPDIR` points the compiler at an empty directory of this test's own, so what is left behind
+/// can be listed rather than guessed at.
+#[test]
+fn intermediates_are_removed_unless_they_are_asked_for() {
+    for (shape, keep) in [("clean", false), ("kept", true)] {
+        let directory = driver_scratch(&format!("temps-{shape}"));
+        let temporary = directory.join("tmp");
+        std::fs::create_dir_all(&temporary).expect("could not create the temp directory");
+        let source = write_program(&directory, HELLO);
+
+        let mut command = Command::new(RUSTYCC);
+        command
+            .env("TMPDIR", &temporary)
+            .arg(&source)
+            .arg("-o")
+            .arg(directory.join("program"));
+        if keep {
+            command.arg("--keep-temps");
+        }
+
+        let built = command.output().unwrap();
+        assert!(
+            built.status.success(),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+
+        let left = std::fs::read_dir(&temporary)
+            .expect("could not list the temp directory")
+            .count();
+
+        if keep {
+            assert_eq!(left, 1, "--keep-temps should leave the workspace behind");
+        } else {
+            assert_eq!(left, 0, "intermediates were left behind: {left} entries");
+        }
+    }
+}
+
+/// A failing link leaves nothing behind either, and says what the toolchain said.
+#[test]
+fn a_failing_link_is_reported_and_cleans_up() {
+    let directory = driver_scratch("link-failure");
+    let temporary = directory.join("tmp");
+    std::fs::create_dir_all(&temporary).expect("could not create the temp directory");
+    let source = write_program(
+        &directory,
+        "int missing(void);\nint main(void) { return missing(); }\n",
+    );
+
+    let built = Command::new(RUSTYCC)
+        .env("TMPDIR", &temporary)
+        .arg(&source)
+        .arg("-o")
+        .arg(directory.join("program"))
+        .output()
+        .unwrap();
+
+    assert!(
+        !built.status.success(),
+        "a program with no definition should not link"
+    );
+
+    let stderr = String::from_utf8_lossy(&built.stderr);
+    assert!(stderr.contains("linking failed"), "got: {stderr}");
+    assert!(
+        stderr.contains("missing") || stderr.contains("Undefined"),
+        "the toolchain's own words should survive: {stderr}"
+    );
+    assert!(!stderr.contains("panicked"), "got: {stderr}");
+
+    let left = std::fs::read_dir(&temporary)
+        .expect("could not list the temp directory")
+        .count();
+    assert_eq!(left, 0, "a failed run left intermediates behind");
+}
+
+/// Two compilations running at once do not write over each other's intermediates.
+#[test]
+fn concurrent_compilations_do_not_collide() {
+    let directory = driver_scratch("concurrent");
+    let temporary = directory.join("tmp");
+    std::fs::create_dir_all(&temporary).expect("could not create the temp directory");
+
+    let mut running = Vec::new();
+    for index in 0..4 {
+        let source = directory.join(format!("program{index}.c"));
+        std::fs::write(&source, format!("int main(void) {{ return {index}; }}\n"))
+            .expect("could not write the program");
+
+        running.push((
+            index,
+            Command::new(RUSTYCC)
+                .env("TMPDIR", &temporary)
+                .arg(&source)
+                .arg("-o")
+                .arg(directory.join(format!("program{index}")))
+                .spawn()
+                .expect("could not start the compiler"),
+        ));
+    }
+
+    for (index, child) in running {
+        let finished = child
+            .wait_with_output()
+            .expect("could not wait for the compiler");
+        assert!(
+            finished.status.success(),
+            "compilation {index} failed: {}",
+            String::from_utf8_lossy(&finished.stderr)
+        );
+
+        let run = Command::new(directory.join(format!("program{index}")))
+            .output()
+            .expect("could not run the program");
+        assert_eq!(
+            run.status.code(),
+            Some(index),
+            "compilation {index} produced the wrong program"
+        );
+    }
+}

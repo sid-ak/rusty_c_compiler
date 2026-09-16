@@ -15,6 +15,7 @@ pub mod ast;
 pub mod cli;
 pub mod codegen;
 pub mod diagnostics;
+pub mod driver;
 pub mod lexer;
 pub mod parser;
 pub mod runtime;
@@ -36,6 +37,8 @@ use crate::diagnostics::{Diagnostic, SourceMap};
 pub struct Artifacts {
     /// The human-readable dump the requested `--dump-*` stage produced.
     pub dump: Option<String>,
+    /// The generated assembly, once the pipeline has gone that far.
+    pub assembly: Option<String>,
 }
 
 /// A failure that is not a diagnostic about the user's program.
@@ -56,6 +59,11 @@ pub enum Error {
         /// How many diagnostics were reported.
         count: usize,
     },
+    /// Something between assembly text and a finished program went wrong.
+    Driver {
+        /// What went wrong.
+        cause: driver::DriverError,
+    },
 }
 
 impl fmt::Display for Error {
@@ -68,6 +76,7 @@ impl fmt::Display for Error {
                 let plural = if *count == 1 { "error" } else { "errors" };
                 write!(formatter, "{count} {plural} generated")
             }
+            Error::Driver { cause } => write!(formatter, "{cause}"),
         }
     }
 }
@@ -77,6 +86,7 @@ impl std::error::Error for Error {
         match self {
             Error::Read { cause, .. } => Some(cause),
             Error::Rejected { .. } => None,
+            Error::Driver { cause } => Some(cause),
         }
     }
 }
@@ -103,6 +113,7 @@ pub fn compile(
 
         return Ok(Artifacts {
             dump: Some(lexer::dump(&source_map, &lexed.tokens)),
+            ..Artifacts::default()
         });
     }
 
@@ -114,6 +125,7 @@ pub fn compile(
     if options.stage() == Stage::Ast {
         return Ok(Artifacts {
             dump: Some(ast::dump(&parsed.program, ast::Spans::Hidden)),
+            ..Artifacts::default()
         });
     }
 
@@ -125,10 +137,23 @@ pub fn compile(
     if options.stage() == Stage::Annotations {
         return Ok(Artifacts {
             dump: Some(analysis.annotations.dump()),
+            ..Artifacts::default()
         });
     }
 
-    Ok(Artifacts::default())
+    if options.stage() == Stage::Check {
+        return Ok(Artifacts::default());
+    }
+
+    let generated = codegen::generate(&parsed.program, &analysis.annotations);
+    if !generated.diagnostics.is_empty() {
+        return Err(generated.diagnostics);
+    }
+
+    Ok(Artifacts {
+        assembly: Some(generated.assembly),
+        ..Artifacts::default()
+    })
 }
 
 /// Read `options.input`, compile it, and emit whatever the requested stage produces.
@@ -143,6 +168,11 @@ pub fn run(options: &Options) -> Result<(), Error> {
             if let Some(dump) = artifacts.dump {
                 print!("{dump}");
             }
+
+            if let Some(assembly) = artifacts.assembly {
+                emit(&assembly, options)?;
+            }
+
             Ok(())
         }
         Err(diagnostics) => {
@@ -155,6 +185,54 @@ pub fn run(options: &Options) -> Result<(), Error> {
             })
         }
     }
+}
+
+/// Writes `assembly` out, and builds it as far as the requested stage asks.
+fn emit(assembly: &str, options: &Options) -> Result<(), Error> {
+    if let Some(path) = &options.emit_asm_to {
+        driver::write(path, assembly.as_bytes()).map_err(|cause| Error::Driver { cause })?;
+    }
+
+    let stage = options.stage();
+    let product = match stage {
+        Stage::Assembly => {
+            // `-S` produces the assembly and nothing else, so it is written where the output would
+            // otherwise have gone rather than through a temporary directory.
+            let path = options
+                .output
+                .clone()
+                .unwrap_or_else(|| default_output(&options.input, "s"));
+
+            return driver::write(&path, assembly.as_bytes())
+                .map_err(|cause| Error::Driver { cause });
+        }
+        Stage::Object => driver::Product::Object,
+        _ => driver::Product::Executable,
+    };
+
+    let default_extension = if product == driver::Product::Object {
+        "o"
+    } else {
+        ""
+    };
+    let output = options
+        .output
+        .clone()
+        .unwrap_or_else(|| default_output(&options.input, default_extension));
+
+    driver::build(assembly, &output, product, options.keep_temps)
+        .map_err(|cause| Error::Driver { cause })
+}
+
+/// Where output goes when `-o` did not say: beside the input, with `extension`.
+fn default_output(input: &Path, extension: &str) -> PathBuf {
+    let stem = input.file_stem().unwrap_or_default();
+    let mut path = PathBuf::from(stem);
+    if !extension.is_empty() {
+        path.set_extension(extension);
+    }
+
+    path
 }
 
 #[cfg(test)]
