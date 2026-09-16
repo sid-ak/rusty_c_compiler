@@ -77,6 +77,13 @@ Four pieces make that work, and this phase built all four:
 - Fuzzing, which asks a different question entirely: not "is the answer right" but "does the
   compiler survive input that is not a program at all".
 
+The part of the [architecture](../architecture.md#testing-architecture) this phase builds is
+outlined in red. It is the only phase whose work sits beside the pipeline rather than inside it:
+nothing here changes what the compiler does, and everything here is about finding out whether what
+it does is right.
+
+![Phase 5 in the architecture: the testing tiers](../assets/phase-5.svg)
+
 ## Components
 
 ### The Oracle Problem
