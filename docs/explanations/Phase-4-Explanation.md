@@ -362,19 +362,31 @@ instruction assembles perfectly.
 
 ## Learnings
 
-1. Two bugs survived every unit test and were caught only by running whole programs, and both have
-   the same shape. A decayed array parameter is an eight-byte address, and the function choosing an
-   access width mapped "not one byte" to a word — so the prologue spilled the low half of the
-   pointer and discarded the rest. It is a two-way branch over a domain that had quietly become
-   three-valued: it cannot fail to compile, and it does not produce a wrong number, it crashes
-   depending on what was left in memory. The unit tests for calls passed because a reused frame slot
-   happened to still hold the right upper half.
-2. The second was the same distinction in the other direction. `address_of` on a decayed parameter
+1. One mistake produced three separate bugs, and none of them could fail to compile. A decayed array
+   parameter is an eight-byte address, and three different places decided how wide a value was by
+   asking a question with only two answers:
+    - The callee's prologue mapped "not one byte" to a word, so it spilled the low half of the
+      pointer and discarded the rest.
+    - The caller wrote every stack-passed argument through `w8`. On ARM64 the register name fixes
+      the width, not the mnemonic — `ldr` and `str` are spelled the same for four bytes and eight,
+      and `w8` is the low half of `x8` — so the callee then read eight bytes from a slot where four
+      were written.
+    - That same caller took the width from the type the source declared rather than the type after
+      decay, so an array at a stack position measured as a word and misaligned every argument after
+      it.
+
+   It is a two-way branch over a domain that had quietly become three-valued. It cannot fail to
+   compile and it does not give a wrong number; it crashes, depending on what was left in memory.
+   The unit tests for calls passed throughout, because a reused frame slot happened to still hold
+   the right upper half. The first was found by running a corpus program, and the other two by
+   review after the phase was otherwise finished — which is the argument for the register-naming
+   rule now living in one shared function rather than on each side of the calling convention.
+2. A fourth bug was the same distinction pointing the other way. `address_of` on a decayed parameter
    loads the address out of its slot, which is right for indexing it — and the code that reads an
    lvalue's value then loaded from that address as well, so passing the array on to another function
    passed its first element instead. `recursion.c` found it; nothing smaller did. A value whose
-   meaning depends on where it is used needs the two meanings written down, which is now what the
-   type of the expression decides.
+   meaning depends on where it is used needs both meanings written down, which is now what the type
+   of the expression decides.
 3. Reading the reference implementation beat recalling the specification, repeatedly. Apple's ARM64
    platforms pack stack arguments at their natural size rather than giving each eight bytes, which
    `clang -S` shows in one line and the generic AAPCS64 document does not say. `sub sp, sp, #5008`
@@ -384,7 +396,9 @@ instruction assembles perfectly.
 4. A test that passes immediately has not been shown to test anything. The frame's large-offset path,
    the short-circuit branches, and the argument-parking scheme were each written with a test that
    passed on its first run; each was then broken deliberately to confirm the test noticed. One of
-   them did not, and was rewritten.
+   them did not, and was rewritten. The gap this did not close is the one the bugs above fell
+   through: every test written for calls used eight arguments or fewer, so nothing exercised the
+   stack path at all, and a test cannot be shown to have teeth if it was never written.
 5. An initializer that assembles is not an initializer that works. `char g[6] = "hello"` was lowered
    by evaluating the literal as an expression — which yields the address of the read-only copy — and
    storing that into the array at the element's width, producing one byte of a pointer where the
