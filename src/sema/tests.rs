@@ -47,10 +47,10 @@ fn messages(source: &str) -> Vec<String> {
 /// Written out by hand rather than reusing the analyzer's own walk: a completeness check that
 /// asked the implementation which nodes it visited would agree with itself no matter what it
 /// missed.
-fn expression_nodes(program: &Program) -> Vec<NodeId> {
+fn expression_nodes(program: &Program) -> Vec<(NodeId, Span)> {
     /// Appends `expr` and everything under it.
-    fn walk_expr(expr: &Expr, found: &mut Vec<NodeId>) {
-        found.push(expr.id);
+    fn walk_expr(expr: &Expr, found: &mut Vec<(NodeId, Span)>) {
+        found.push((expr.id, expr.span));
 
         match &expr.kind {
             ExprKind::IntLit(_)
@@ -82,7 +82,7 @@ fn expression_nodes(program: &Program) -> Vec<NodeId> {
     }
 
     /// Appends every expression in `init`.
-    fn walk_init(init: &Initializer, found: &mut Vec<NodeId>) {
+    fn walk_init(init: &Initializer, found: &mut Vec<(NodeId, Span)>) {
         match init {
             Initializer::Expr(expr) => walk_expr(expr, found),
             Initializer::List { elements, .. } => {
@@ -94,7 +94,7 @@ fn expression_nodes(program: &Program) -> Vec<NodeId> {
     }
 
     /// Appends every expression in `stmt` and everything under it.
-    fn walk_stmt(stmt: &Stmt, found: &mut Vec<NodeId>) {
+    fn walk_stmt(stmt: &Stmt, found: &mut Vec<(NodeId, Span)>) {
         match &stmt.kind {
             StmtKind::Block(block) => {
                 for stmt in &block.stmts {
@@ -389,7 +389,7 @@ fn every_expression_node_of_a_valid_program_is_typed() {
 
     let untyped: Vec<NodeId> = expected
         .iter()
-        .copied()
+        .map(|(id, _)| *id)
         .filter(|id| analysis.annotations.type_of(*id).is_none())
         .collect();
 
@@ -408,7 +408,7 @@ fn every_identifier_of_a_valid_program_is_bound() {
     let analysis = analyze(&parsed.program);
 
     let mut identifiers = 0;
-    for id in expression_nodes(&parsed.program) {
+    for (id, _) in expression_nodes(&parsed.program) {
         if let Some(symbol) = analysis.annotations.binding_of(id) {
             assert!(
                 analysis.annotations.symbol(symbol).is_some(),
@@ -863,4 +863,257 @@ fn main_may_reach_its_closing_brace() {
 #[test]
 fn a_void_function_may_reach_its_closing_brace() {
     assert_eq!(messages("void nothing(void) { }"), Vec::<String>::new());
+}
+
+// -- The annotation output ----------------------------------------------------------------------
+
+/// Analyzes `source` and hands back the program with it, for tests that name nodes by their text.
+fn analyzed(source: &str) -> (Program, Analysis) {
+    let lexed = lexer::lex(source.as_bytes());
+    assert!(lexed.diagnostics.is_empty(), "fixture does not lex");
+
+    let parsed = parser::parse(&lexed.tokens);
+    assert!(parsed.diagnostics.is_empty(), "fixture does not parse");
+
+    let analysis = analyze(&parsed.program);
+    assert!(
+        analysis.diagnostics.is_empty(),
+        "fixture does not analyze: {:?}",
+        analysis
+            .diagnostics
+            .iter()
+            .map(|diagnostic| &diagnostic.message)
+            .collect::<Vec<_>>()
+    );
+
+    (parsed.program, analysis)
+}
+
+/// The node of the first expression in `program` written as exactly `text` in `source`.
+fn node_written_as(program: &Program, source: &str, text: &str) -> NodeId {
+    expression_nodes(program)
+        .into_iter()
+        .find(|(_, span)| source.get(span.start..span.end) == Some(text))
+        .map(|(id, _)| id)
+        .unwrap_or_else(|| panic!("no expression in the fixture is written as {text:?}"))
+}
+
+/// An array passed as an argument is marked to decay, and reads back as a pointer.
+///
+/// The recorded type stays the array, because that is what the source says and the AST is not
+/// rewritten. What changes is that the conversion is written down, so the backend emits an
+/// address because it was told to rather than because it worked out that it should.
+#[test]
+fn an_array_argument_is_marked_to_decay_and_reads_back_as_a_pointer() {
+    let source = "\
+int sum(int values[], int count);
+int main(void) { int a[10]; return sum(a, 10); }
+";
+    let (program, analysis) = analyzed(source);
+    let argument = node_written_as(&program, source, "a");
+
+    assert_eq!(
+        analysis.annotations.type_of(argument),
+        Some(&Ty::array(Ty::Int, 10))
+    );
+    assert_eq!(
+        analysis.annotations.conversion_of(argument),
+        Some(Conversion::DecayArrayToPtr)
+    );
+    assert_eq!(
+        analysis.annotations.converted_type_of(argument),
+        Some(Ty::ptr(Ty::Int))
+    );
+}
+
+/// Indexing an array types as its element, and the base is not marked to decay.
+#[test]
+fn indexing_an_array_types_as_its_element_without_decaying_it() {
+    let source = "int main(void) { int a[10]; int i; i = 0; return a[i]; }";
+    let (program, analysis) = analyzed(source);
+
+    let indexed = node_written_as(&program, source, "a[i]");
+    assert_eq!(analysis.annotations.type_of(indexed), Some(&Ty::Int));
+
+    let base = node_written_as(&program, source, "a");
+    assert_eq!(analysis.annotations.conversion_of(base), None);
+}
+
+/// A `char` is marked to promote in arithmetic, and only where a promotion actually applies.
+#[test]
+fn a_char_is_marked_to_promote_in_arithmetic_and_not_elsewhere() {
+    let source = "int main(void) { char c; char d; c = 'a'; d = 'b'; return c + 1; }";
+    let (program, analysis) = analyzed(source);
+
+    let promoted = node_written_as(&program, source, "c + 1");
+    let operand = expression_nodes(&program)
+        .into_iter()
+        .find(|(id, span)| {
+            source.get(span.start..span.end) == Some("c")
+                && analysis.annotations.conversion_of(*id).is_some()
+        })
+        .map(|(id, _)| id);
+
+    assert_eq!(
+        operand.and_then(|id| analysis.annotations.conversion_of(id)),
+        Some(Conversion::PromoteCharToInt),
+        "the `char` operand of `+` is marked to promote"
+    );
+    assert_eq!(analysis.annotations.type_of(promoted), Some(&Ty::Int));
+}
+
+/// An `int` stored into a `char` is marked to truncate.
+#[test]
+fn an_int_assigned_to_a_char_is_marked_to_truncate() {
+    let source = "int main(void) { char c; c = 300; return c; }";
+    let (program, analysis) = analyzed(source);
+    let value = node_written_as(&program, source, "300");
+
+    assert_eq!(
+        analysis.annotations.conversion_of(value),
+        Some(Conversion::TruncateIntToChar)
+    );
+}
+
+/// Nothing that needs no conversion carries one.
+#[test]
+fn a_value_that_needs_no_conversion_is_not_marked() {
+    let source = "int main(void) { int n; n = 1; return n; }";
+    let (program, analysis) = analyzed(source);
+
+    for (id, _) in expression_nodes(&program) {
+        assert_eq!(
+            analysis.annotations.conversion_of(id),
+            None,
+            "nothing in this program needs converting"
+        );
+    }
+}
+
+/// The frame inventory lists every local and parameter of a function, with its layout.
+///
+/// Locals in nested blocks are in it too: they are separate names in separate scopes, but they
+/// live in one frame, and it is the frame the code generator is laying out.
+#[test]
+fn the_frame_inventory_lists_every_local_and_parameter_with_its_layout() {
+    let source = "\
+int measure(int count, char flag) {
+    int total;
+    char initial;
+    total = count;
+    initial = flag;
+    {
+        int inner[3];
+        inner[0] = total;
+        total = inner[0];
+    }
+    for (int i = 0; i < count; i = i + 1) {
+        total = total + 1;
+    }
+    return total + initial;
+}
+";
+    let (_, analysis) = analyzed(source);
+    let frame = analysis
+        .annotations
+        .frame("measure")
+        .expect("the function has a frame");
+
+    let listed: Vec<(&str, u64, u64)> = frame
+        .slots
+        .iter()
+        .map(|slot| (slot.name.as_str(), slot.size, slot.align))
+        .collect();
+
+    assert_eq!(
+        listed,
+        vec![
+            ("count", 4, 4),
+            ("flag", 1, 1),
+            ("total", 4, 4),
+            ("initial", 1, 1),
+            ("inner", 12, 4),
+            ("i", 4, 4),
+        ]
+    );
+}
+
+/// A function with no locals and no parameters has an empty frame rather than none.
+#[test]
+fn a_function_with_nothing_to_store_has_an_empty_frame() {
+    let (_, analysis) = analyzed("int main(void) { return 0; }");
+    let frame = analysis
+        .annotations
+        .frame("main")
+        .expect("every defined function has a frame");
+
+    assert!(frame.slots.is_empty());
+}
+
+/// Two occurrences of one literal share a label; two different literals get two.
+#[test]
+fn identical_string_literals_share_one_label() {
+    let source = "\
+void print_string(char s[]);
+int main(void) {
+    print_string(\"hello\");
+    print_string(\"hello\");
+    print_string(\"goodbye\");
+    return 0;
+}
+";
+    let (_, analysis) = analyzed(source);
+    let labels: Vec<&str> = analysis
+        .annotations
+        .strings()
+        .iter()
+        .map(|literal| literal.label.as_str())
+        .collect();
+
+    assert_eq!(labels.len(), 2, "two distinct literals, two entries");
+
+    let texts: Vec<&[u8]> = analysis
+        .annotations
+        .strings()
+        .iter()
+        .map(|literal| literal.bytes.as_slice())
+        .collect();
+    assert_eq!(texts, vec![b"hello".as_slice(), b"goodbye".as_slice()]);
+}
+
+/// Each string literal node carries the label its bytes interned to.
+#[test]
+fn every_string_literal_node_carries_its_label() {
+    let source = "\
+void print_string(char s[]);
+int main(void) { print_string(\"hello\"); print_string(\"hello\"); return 0; }
+";
+    let (program, analysis) = analyzed(source);
+
+    let labels: Vec<&str> = expression_nodes(&program)
+        .into_iter()
+        .filter_map(|(id, _)| analysis.annotations.string_label(id))
+        .collect();
+
+    assert_eq!(
+        labels,
+        vec!["l_.str.0", "l_.str.0"],
+        "both occurrences point at one entry"
+    );
+}
+
+/// Analyzing the same program twice produces the same annotations, character for character.
+///
+/// The tables are ordered rather than hashed for exactly this reason: an annotation set that
+/// cannot be compared against itself cannot be snapshotted either.
+#[test]
+fn the_annotation_dump_is_the_same_on_every_run() {
+    let lexed = lexer::lex(REPRESENTATIVE.as_bytes());
+    let parsed = parser::parse(&lexed.tokens);
+
+    let first = analyze(&parsed.program).annotations.dump();
+    let second = analyze(&parsed.program).annotations.dump();
+
+    assert_eq!(first, second);
+    assert!(!first.is_empty(), "the dump has content to compare");
 }

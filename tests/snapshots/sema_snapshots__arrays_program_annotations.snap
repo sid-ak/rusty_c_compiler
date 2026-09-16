@@ -1,0 +1,292 @@
+---
+source: tests/sema_snapshots.rs
+expression: "dump(&Path::new(CORPUS).join(\"arrays.c\"))"
+---
+types
+  #7 int
+  #10 int
+  #12 int
+  #13 int
+  #14 int
+  #15 int
+  #16 int
+  #17 int
+  #18 int
+  #19 int
+  #20 int
+  #21 int
+  #22 int *
+  #23 int
+  #24 int
+  #25 int
+  #26 int
+  #30 int
+  #36 int
+  #38 int
+  #39 int
+  #40 int
+  #41 int
+  #42 int
+  #43 int
+  #44 int
+  #45 int
+  #46 int *
+  #47 int
+  #48 int
+  #49 int
+  #50 int
+  #57 int
+  #59 int
+  #60 int
+  #61 int
+  #62 int
+  #63 int
+  #64 int
+  #65 int
+  #66 int
+  #67 int[5]
+  #68 int
+  #69 int
+  #70 int
+  #71 int
+  #72 int
+  #73 int
+  #77 void(int)
+  #78 int[5]
+  #79 int
+  #80 int
+  #81 void
+  #83 void(int)
+  #84 int[5]
+  #85 int
+  #86 int
+  #87 void
+  #89 void(int)
+  #90 int[5]
+  #91 int
+  #92 int
+  #93 int[5]
+  #94 int
+  #95 int
+  #96 int
+  #97 void
+  #99 void(int)
+  #100 int(int *, int)
+  #101 int[5]
+  #102 int
+  #103 int
+  #104 void
+  #106 int
+  #107 int
+  #108 int
+  #109 int
+  #112 void(int)
+  #113 int[4]
+  #114 int
+  #115 int
+  #116 void
+  #118 void(int)
+  #119 int[4]
+  #120 int
+  #121 int
+  #122 void
+  #124 void(int)
+  #125 int(int *, int)
+  #126 int[4]
+  #127 int
+  #128 int
+  #129 void
+  #131 int
+  #132 int
+  #135 void(int)
+  #136 int[3]
+  #137 int
+  #138 int
+  #139 int[3]
+  #140 int
+  #141 int
+  #142 int
+  #143 void
+  #145 int
+  #148 void(int)
+  #149 int[4]
+  #150 int
+  #151 int
+  #152 int
+  #153 int
+  #154 void
+  #156 void(int)
+  #157 int[4]
+  #158 int
+  #159 int
+  #160 int
+  #161 void
+  #163 void(int)
+  #164 int[4]
+  #165 int
+  #166 int
+  #167 void
+  #169 int[5]
+  #170 int
+  #171 int
+  #172 int[4]
+  #173 int
+  #174 int
+  #175 int
+  #177 int[5]
+  #178 int
+  #179 int
+  #180 int[5]
+  #181 int
+  #182 int
+  #183 int
+  #184 int
+  #185 int
+  #187 void(int)
+  #188 int[5]
+  #189 int
+  #190 int
+  #191 void
+  #193 void(int)
+  #194 int[5]
+  #195 int
+  #196 int
+  #197 void
+  #199 void(int *, int, int)
+  #200 int[4]
+  #201 int
+  #202 int
+  #203 void
+  #205 void(int)
+  #206 int(int *, int)
+  #207 int[4]
+  #208 int
+  #209 int
+  #210 void
+  #212 char
+  #213 char
+  #214 char
+  #217 void(char)
+  #218 char[3]
+  #219 int
+  #220 char
+  #221 void
+  #223 void(char)
+  #224 char[3]
+  #225 int
+  #226 char
+  #227 void
+  #229 void(char)
+  #230 char
+  #231 void
+  #233 int
+conversions
+  #101 array -> pointer
+  #126 array -> pointer
+  #200 array -> pointer
+  #207 array -> pointer
+bindings
+  #4 global totals
+  #5 param[0] values
+  #6 param[1] count
+  #8 local total
+  #11 local i
+  #12 local i
+  #13 param[1] count
+  #15 local i
+  #16 local i
+  #20 local total
+  #21 local total
+  #22 param[0] values
+  #23 local i
+  #30 local total
+  #33 param[0] values
+  #34 param[1] count
+  #35 param[2] value
+  #37 local i
+  #38 local i
+  #39 param[1] count
+  #41 local i
+  #42 local i
+  #46 param[0] values
+  #47 local i
+  #49 param[2] value
+  #55 local numbers
+  #58 local i
+  #59 local i
+  #62 local i
+  #63 local i
+  #67 local numbers
+  #68 local i
+  #70 local i
+  #71 local i
+  #77 function print_int
+  #78 local numbers
+  #83 function print_int
+  #84 local numbers
+  #89 function print_int
+  #90 local numbers
+  #93 local numbers
+  #99 function print_int
+  #100 function sum
+  #101 local numbers
+  #110 local primes
+  #112 function print_int
+  #113 local primes
+  #118 function print_int
+  #119 local primes
+  #124 function print_int
+  #125 function sum
+  #126 local primes
+  #133 local partial
+  #135 function print_int
+  #136 local partial
+  #139 local partial
+  #146 local index
+  #148 function print_int
+  #149 local primes
+  #150 local index
+  #156 function print_int
+  #157 local primes
+  #158 local index
+  #163 function print_int
+  #164 local primes
+  #165 local index
+  #169 local numbers
+  #172 local primes
+  #177 local numbers
+  #180 local numbers
+  #187 function print_int
+  #188 local numbers
+  #193 function print_int
+  #194 local numbers
+  #199 function fill
+  #200 global totals
+  #205 function print_int
+  #206 function sum
+  #207 global totals
+  #215 local letters
+  #217 function print_char
+  #218 local letters
+  #223 function print_char
+  #224 local letters
+  #229 function print_char
+frames
+  fill
+    0 param[0] values size 8 align 8
+    1 param[1] count size 4 align 4
+    2 param[2] value size 4 align 4
+    3 local i size 4 align 4
+  main
+    0 local numbers size 20 align 4
+    1 local i size 4 align 4
+    2 local primes size 16 align 4
+    3 local partial size 12 align 4
+    4 local index size 4 align 4
+    5 local letters size 3 align 1
+  sum
+    0 param[0] values size 8 align 8
+    1 param[1] count size 4 align 4
+    2 local total size 4 align 4
+    3 local i size 4 align 4
+strings

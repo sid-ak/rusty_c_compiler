@@ -1,0 +1,297 @@
+---
+source: tests/sema_snapshots.rs
+expression: "dump(&Path::new(CORPUS).join(\"control_flow.c\"))"
+---
+types
+  #4 int
+  #7 int
+  #10 int
+  #11 int
+  #12 int
+  #13 void(int)
+  #14 int
+  #15 void
+  #19 int
+  #20 int
+  #21 int
+  #22 void(int)
+  #23 int
+  #24 void
+  #27 void(int)
+  #28 int
+  #29 void
+  #33 int
+  #34 int
+  #35 int
+  #36 void(int)
+  #37 int
+  #38 void
+  #41 int
+  #42 int
+  #43 int
+  #44 void(int)
+  #45 int
+  #46 void
+  #49 void(int)
+  #50 int
+  #51 void
+  #56 int
+  #57 int
+  #58 int
+  #59 int
+  #60 int
+  #61 int
+  #62 void(int)
+  #63 int
+  #64 void
+  #66 void(int)
+  #67 int
+  #68 void
+  #72 int
+  #73 int
+  #74 int
+  #75 int
+  #76 int
+  #77 int
+  #78 int
+  #79 int
+  #81 int
+  #82 int
+  #83 int
+  #84 int
+  #85 int
+  #89 void(int)
+  #90 int
+  #91 void
+  #93 int
+  #95 int
+  #96 int
+  #97 int
+  #98 int
+  #99 int
+  #100 int
+  #101 int
+  #102 int
+  #103 void(int)
+  #104 int
+  #105 void
+  #109 int
+  #112 int
+  #113 int
+  #114 int
+  #115 int
+  #116 int
+  #117 int
+  #118 int
+  #119 int
+  #120 void(int)
+  #121 int
+  #122 void
+  #126 int
+  #127 int
+  #128 int
+  #129 int
+  #130 int
+  #131 int
+  #132 void(int)
+  #133 int
+  #134 void
+  #136 int
+  #137 int
+  #138 int
+  #139 int
+  #140 int
+  #144 int
+  #145 int
+  #146 int
+  #147 int
+  #148 int
+  #149 int
+  #150 int
+  #151 int
+  #152 int
+  #153 int
+  #154 int
+  #158 void(int)
+  #159 int
+  #160 void
+  #164 int
+  #165 int
+  #166 int
+  #168 int
+  #169 int
+  #170 int
+  #171 int
+  #172 int
+  #174 int
+  #175 int
+  #176 int
+  #182 void(int)
+  #183 int
+  #184 void
+  #186 int
+  #188 int
+  #189 int
+  #190 int
+  #191 int
+  #192 int
+  #193 int
+  #194 int
+  #195 int
+  #196 int
+  #197 int
+  #198 int
+  #199 int
+  #200 int
+  #204 void(int)
+  #205 int
+  #206 void
+  #210 int
+  #213 int
+  #214 int
+  #215 int
+  #216 int
+  #217 int
+  #218 int
+  #219 int
+  #220 int
+  #222 int
+  #223 int
+  #224 int
+  #228 void(int)
+  #229 int
+  #230 void
+  #234 int
+  #236 int
+  #237 int
+  #238 int
+  #239 int
+  #240 int
+  #241 int
+  #242 int
+  #243 int
+  #244 int
+  #246 int
+  #247 int
+  #248 int
+  #249 int
+  #250 int
+  #251 int
+  #252 int
+  #253 int
+  #254 int
+  #255 int
+  #256 int
+  #260 void(int)
+  #261 int
+  #262 int
+  #263 int
+  #264 int
+  #265 int
+  #266 void
+  #272 int
+  #275 void(int)
+  #276 int
+  #277 void
+  #282 void(char)
+  #283 char
+  #284 void
+  #286 int
+conversions
+bindings
+  #5 local i
+  #8 local total
+  #10 local i
+  #13 function print_int
+  #19 local i
+  #22 function print_int
+  #27 function print_int
+  #33 local i
+  #36 function print_int
+  #41 local i
+  #44 function print_int
+  #49 function print_int
+  #56 local i
+  #59 local i
+  #62 function print_int
+  #66 function print_int
+  #72 local i
+  #75 local total
+  #76 local total
+  #77 local i
+  #81 local i
+  #82 local i
+  #89 function print_int
+  #90 local total
+  #94 local j
+  #95 local j
+  #98 local j
+  #99 local j
+  #103 function print_int
+  #104 local j
+  #110 local k
+  #112 local k
+  #115 local k
+  #116 local k
+  #120 function print_int
+  #121 local k
+  #126 local k
+  #129 local k
+  #132 function print_int
+  #133 local k
+  #136 local k
+  #137 local k
+  #144 local k
+  #147 local k
+  #148 local k
+  #152 local k
+  #158 function print_int
+  #159 local k
+  #164 local k
+  #168 local k
+  #169 local k
+  #174 local k
+  #182 function print_int
+  #183 local k
+  #187 local m
+  #188 local m
+  #191 local m
+  #192 local m
+  #196 local m
+  #204 function print_int
+  #205 local m
+  #211 local p
+  #213 local p
+  #216 local p
+  #217 local p
+  #222 local p
+  #228 function print_int
+  #229 local p
+  #235 local r
+  #236 local r
+  #239 local r
+  #240 local r
+  #245 local c
+  #246 local c
+  #249 local c
+  #250 local c
+  #254 local c
+  #260 function print_int
+  #261 local r
+  #264 local c
+  #273 local shadowed
+  #275 function print_int
+  #276 local shadowed
+  #282 function print_char
+frames
+  main
+    0 local i size 4 align 4
+    1 local total size 4 align 4
+    2 local j size 4 align 4
+    3 local k size 4 align 4
+    4 local m size 4 align 4
+    5 local p size 4 align 4
+    6 local r size 4 align 4
+    7 local c size 4 align 4
+    8 local shadowed size 4 align 4
+strings

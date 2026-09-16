@@ -30,9 +30,9 @@ use crate::ast::{
 };
 use crate::diagnostics::{Diagnostic, DiagnosticBag, DiagnosticKind, Span};
 use crate::parser::MAX_NESTING_DEPTH;
-use crate::sema::annotations::Annotations;
+use crate::sema::annotations::{Annotations, Frame, FrameSlot};
 use crate::sema::scope::{Scopes, SymbolId, SymbolKind};
-use crate::sema::types::{Assignability, Ty};
+use crate::sema::types::{Assignability, Conversion, Layout, Ty};
 
 /// What analysis produced: the annotations, and whatever it found wrong.
 #[derive(Debug)]
@@ -92,6 +92,8 @@ struct Analyzer {
     function_name: String,
     /// How many loops enclose the statement being walked, so `break` can be placed.
     loop_depth: usize,
+    /// What the function being walked needs storage for, in declaration order.
+    frame: Frame,
 }
 
 /// What an expression is being evaluated for, which decides what its type is allowed to be.
@@ -116,6 +118,7 @@ impl Analyzer {
             return_type: Ty::Void,
             function_name: String::new(),
             loop_depth: 0,
+            frame: Frame::default(),
         }
     }
 
@@ -273,6 +276,7 @@ impl Analyzer {
         self.return_type = self.spec_type(&signature.return_type, DeclPosition::Variable);
         self.function_name = signature.name.text.clone();
         self.loop_depth = 0;
+        self.frame = Frame::default();
         self.scopes.enter_function();
 
         for (position, param) in signature.params.iter().enumerate() {
@@ -293,6 +297,10 @@ impl Analyzer {
         }
 
         self.scopes.leave_function();
+
+        let frame = std::mem::take(&mut self.frame);
+        self.annotations.record_frame(&signature.name.text, frame);
+
         self.check_reaches_the_end(signature, body);
     }
 
@@ -380,7 +388,9 @@ impl Analyzer {
                 self.scopes.leave_block();
             }
             StmtKind::Return(Some(expr)) => {
-                self.expr(expr);
+                let ty = self.expr(expr);
+                let returns = self.return_type.clone();
+                self.record_conversion_to(expr, &ty, &returns);
 
                 if self.return_type == Ty::Void {
                     self.report(
@@ -410,6 +420,28 @@ impl Analyzer {
         self.leave();
     }
 
+    /// Records the conversion that carries `expr`'s value into a location of type `expected`.
+    ///
+    /// The one place an implicit conversion is decided, so a promotion at an argument, a
+    /// truncation at an assignment, and a decay at a call are all written down by the same rule
+    /// rather than by three that could drift apart.
+    fn record_conversion_to(&mut self, expr: &Expr, actual: &Ty, expected: &Ty) {
+        if let Assignability::Converted(conversion) = Ty::assignability(expected, actual) {
+            self.annotations.record_conversion(expr.id, conversion);
+        }
+    }
+
+    /// Records that `expr` is promoted, if its type is one that promotes.
+    ///
+    /// Applies wherever a value is computed on rather than stored: the operands of arithmetic,
+    /// comparison, and logical operators, and a subscript.
+    fn record_promotion(&mut self, expr: &Expr, ty: &Ty) {
+        if ty.promotes() {
+            self.annotations
+                .record_conversion(expr.id, Conversion::PromoteCharToInt);
+        }
+    }
+
     /// Reports a `break` or a `continue` that has no loop to apply to.
     fn check_inside_a_loop(&mut self, span: Span, keyword: &str) {
         if self.loop_depth == 0 {
@@ -420,6 +452,7 @@ impl Analyzer {
     /// Types an expression used as a condition, which has to be something testable for truth.
     fn condition(&mut self, expr: &Expr) {
         let ty = self.expr(expr);
+        self.record_promotion(expr, &ty);
 
         if !ty.is_scalar() {
             self.report(
@@ -449,6 +482,7 @@ impl Analyzer {
         let written = match init {
             Initializer::Expr(expr) => {
                 let ty = self.expr(expr);
+                self.record_conversion_to(expr, &ty, declared);
 
                 // A string literal initializing an array fills it, terminator included.
                 match ty {
@@ -511,6 +545,7 @@ impl Analyzer {
             ExprKind::CharLit(_) => Ty::Char,
             // A string literal is an array of `char` one longer than its text, for the terminator.
             ExprKind::StrLit(bytes) => {
+                self.annotations.intern_string(expr.id, bytes);
                 let length = u32::try_from(bytes.len().saturating_add(1)).unwrap_or(u32::MAX);
 
                 Ty::array(Ty::Char, length)
@@ -521,6 +556,8 @@ impl Analyzer {
 
                 match op {
                     UnOp::Not => {
+                        self.record_promotion(operand, &ty);
+
                         if !ty.is_scalar() {
                             self.report(
                                 operand.span,
@@ -531,6 +568,8 @@ impl Analyzer {
                         Ty::Int
                     }
                     UnOp::Negate | UnOp::Plus | UnOp::PreIncrement | UnOp::PreDecrement => {
+                        self.record_promotion(operand, &ty);
+
                         if !ty.is_arithmetic() {
                             self.report(
                                 expr.span,
@@ -546,11 +585,15 @@ impl Analyzer {
                 let left_ty = self.expr(left);
                 let right_ty = self.expr(right);
 
+                self.record_promotion(left, &left_ty);
+                self.record_promotion(right, &right_ty);
+
                 self.check_binary(*op, &left_ty, &right_ty, expr.span)
             }
             ExprKind::Assign { target, value } => {
                 let target_ty = self.expr(target);
-                self.expr(value);
+                let value_ty = self.expr(value);
+                self.record_conversion_to(value, &value_ty, &target_ty);
 
                 if target_ty.decays() {
                     self.report(target.span, "array name is not assignable");
@@ -561,6 +604,7 @@ impl Analyzer {
             ExprKind::Index { base, index } => {
                 let base_ty = self.expr(base);
                 let index_ty = self.expr(index);
+                self.record_promotion(index, &index_ty);
 
                 if !index_ty.is_arithmetic() {
                     self.report(index.span, "array subscript is not an integer");
@@ -687,8 +731,14 @@ impl Analyzer {
     fn check_arguments(&mut self, callee: &Expr, params: &[Ty], arg_types: &[Ty], args: &[Expr]) {
         for (position, ((param, actual), arg)) in params.iter().zip(arg_types).zip(args).enumerate()
         {
-            if Ty::assignability(param, actual) != Assignability::Incompatible {
-                continue;
+            match Ty::assignability(param, actual) {
+                Assignability::Incompatible => {}
+                Assignability::Exact => continue,
+                Assignability::Converted(conversion) => {
+                    self.annotations.record_conversion(arg.id, conversion);
+
+                    continue;
+                }
             }
 
             let name = called_name(callee);
@@ -754,6 +804,7 @@ impl Analyzer {
         match self.scopes.declare(name, ty, kind, span) {
             Ok(id) => {
                 self.annotations.record_binding(node, id);
+                self.add_to_frame(id);
 
                 Some(id)
             }
@@ -767,6 +818,30 @@ impl Analyzer {
                 None
             }
         }
+    }
+
+    /// Gives the symbol `id` a place in the current function's frame, if it needs one.
+    ///
+    /// A global or a function has an address of its own and needs no slot. A type with no layout
+    /// has already been reported as one a variable cannot have, so it takes a slot of size zero
+    /// rather than being dropped, which keeps the inventory and the symbol table the same length.
+    fn add_to_frame(&mut self, id: SymbolId) {
+        let Some(symbol) = self.scopes.symbol(id) else {
+            return;
+        };
+        let Some(slot) = symbol.slot else {
+            return;
+        };
+
+        let layout = symbol.ty.layout().unwrap_or(Layout { size: 0, align: 1 });
+        self.frame.slots.push(FrameSlot {
+            slot,
+            name: symbol.name.clone(),
+            ty: symbol.ty.clone(),
+            size: layout.size,
+            align: layout.align,
+            kind: symbol.kind,
+        });
     }
 
     /// Reports that `name` is declared twice in one scope, pointing at both sites.
