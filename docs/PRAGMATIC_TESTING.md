@@ -261,6 +261,20 @@ Two concrete suites, directly answering "what would it look like to build a suit
 these techniques specifically," rather than treating them as instances that already happen to exist
 inside other suites. Each is scoped to slot into the phase structure `PLAN.md` defines.
 
+Both are still proposals. Neither was adopted, and saying so is more useful than quietly leaving the
+section reading as though they might have been:
+
+- The control-flow coverage tier needs `cargo-llvm-cov` in CI and a decision about what number is
+  low enough to fail a build. Neither is hard; both are a separate change from the one that built
+  the differential suite, and bundling them would have meant arguing about a coverage threshold in
+  the same review as the acceptance criterion.
+- The annotation completeness tier exists in part rather than in full. `every_defined_function_has_a_frame`
+  in `tests/sema_snapshots.rs` is the piece of it that could be written against the interfaces that
+  exist: every function that is defined has storage recorded for it. The all-defs version — every
+  node that needs a type has one — would need a way to enumerate the expression nodes of a tree
+  specifically, which the AST does not currently offer and which is not worth adding to the
+  compiler's surface for one test.
+
 ### A control-flow coverage tier
 
 A CI step, gated behind `cargo-llvm-cov`, producing branch coverage for `src/parser/`, `src/sema/`,

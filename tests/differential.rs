@@ -158,6 +158,10 @@ fn declared_warnings(source: &str) -> Vec<String> {
 ///
 /// The comparison tests link and run, which succeed despite a warning. A directive the assembler
 /// grumbles about is one this compiler should not be emitting even when the program works.
+///
+/// Its artifacts go under a directory of their own rather than beside the comparison's. Cargo runs
+/// these tests in parallel, and this one walks every program, so sharing a directory with the
+/// per-program test for that same program would have the two writing one `.s` at once.
 #[test]
 fn every_program_assembles_without_warnings() {
     let mut complaints = Vec::new();
@@ -168,7 +172,7 @@ fn every_program_assembles_without_warnings() {
             .and_then(|stem| stem.to_str())
             .unwrap_or_default()
             .to_owned();
-        let directory = harness::scratch("differential", &name);
+        let directory = harness::scratch("assembles", &name);
         let source = fs::read(&path).expect("a corpus program should be readable");
         let built = harness::build_with_rustycc(&path, &source, &directory)
             .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
