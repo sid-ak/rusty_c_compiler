@@ -661,8 +661,9 @@ Needs a toolchain the compiler itself does not: `rustup toolchain install nightl
 
 ## Reports
 
-1. `./scripts/test-evidence.sh`: regenerates the toolchain capture and the full-run capture the unit
-   test reports cite, into `docs/reports/unit_tests/evidence/`.
+1. `./scripts/test-evidence.sh`: regenerates every unit's `evidence_<module>.md`, beside that unit's
+   report under `docs/reports/unit_tests/`. `./scripts/test-evidence.sh <module-path>` regenerates a
+   single unit, e.g. `./scripts/test-evidence.sh sema/scope`.
 2. `python3 scripts/test_inventory.py`: refreshes the table of tests in each unit test report from
    the tests' own doc comments.
 3. `python3 scripts/test_inventory.py --check`: what the docs build runs. Fails if a table is stale,

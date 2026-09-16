@@ -1,17 +1,26 @@
 #!/usr/bin/env bash
 #
-# Capture the evidence the unit test reports cite: what the toolchain is, and what a full run does.
+# Capture the evidence each unit's report cites: what a run of just that unit's tests actually
+# produced, and when the code under test and the tests themselves were written.
 #
-# The reports in docs/reports/unit_tests/ say every test passed. That claim is worth what the
-# evidence behind it is worth, so the evidence is a file rather than a memory — and a script rather
-# than a transcript, so it can be regenerated when the code changes instead of going quietly stale.
+# A unit is one `src/**/tests.rs` file together with the source file it tests (`src/diagnostics.rs`
+# for `src/diagnostics/tests.rs`, `src/lexer/mod.rs` for `src/lexer/tests.rs`, and so on), and the
+# narrative report in docs/reports/unit_tests/ that unit already has. For each unit with a report
+# this writes docs/reports/unit_tests/<report folder>/evidence_<module_name>.md, beside that report,
+# containing:
 #
-# Writes two files into docs/reports/unit_tests/evidence/:
+#   - the source file and the test file, hyperlinked to GitHub
+#   - when the source file was created, and when its tests were first created and last updated
+#     (all from git history)
+#   - the exact `cargo test` invocation scoped to that unit, and its complete output
 #
-#   environment.txt   every version the run depended on, from the tools themselves
-#   cargo-test.txt    cargo fmt --check, cargo clippy, and cargo test, in that order
+# A unit with no narrative report yet (see the case statement in `narrative_folder` below) is
+# skipped rather than guessed at.
 #
-# Usage: scripts/test-evidence.sh   (from anywhere)
+# Usage:
+#   scripts/test-evidence.sh                 regenerate every unit's evidence
+#   scripts/test-evidence.sh <module-path>    regenerate one unit only, e.g. `diagnostics` or
+#                                              `lexer/token` (path under src/, without `/tests.rs`)
 
 set -euo pipefail
 
@@ -25,41 +34,120 @@ for directory in "$HOME/.cargo/bin" "$HOME/.local/bin" /opt/homebrew/bin; do
 done
 export PATH
 
-evidence="docs/reports/unit_tests/evidence"
-mkdir -p "$evidence"
+repo_url="https://github.com/sid-ak/rusty_c_compiler"
+branch="main"
+run_date="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+out_root="docs/reports/unit_tests"
 
-# Echoes the command before running it, so the file says what produced each block rather than
-# leaving the reader to infer it.
-run() {
-	printf '\n$ %s\n%s\n' "$*" "====================================================================="
-	"$@" 2>&1 || printf '(exited %s)\n' "$?"
+# Where each unit's narrative report already lives, keyed by the module path under src/ (without
+# `/tests.rs`). Two modules can share one report — `driver` and `cli` both land in
+# 12-driver-and-cli, which reports on both together — so this is a lookup, not a 1:1 derivation.
+# A module absent here has no narrative report yet, so generate_unit skips it rather than placing
+# evidence with nothing to sit beside.
+narrative_folder() {
+	case "$1" in
+	diagnostics) echo "01-diagnostics" ;;
+	ast) echo "02-ast" ;;
+	lexer/token) echo "03-lexer-token-model" ;;
+	lexer) echo "04-lexer-scanner" ;;
+	parser/expr) echo "05-parser-expressions" ;;
+	parser) echo "06-parser-statements-recovery" ;;
+	sema/types) echo "07-sema-type-model" ;;
+	sema/scope) echo "08-sema-scopes" ;;
+	sema) echo "09-sema-analyzer" ;;
+	codegen/emit) echo "10-codegen-emitter" ;;
+	codegen/frame) echo "11-codegen-frame-and-lowering" ;;
+	driver) echo "12-driver-and-cli" ;;
+	cli) echo "12-driver-and-cli" ;;
+	*) echo "" ;;
+	esac
 }
 
-{
-	printf 'Captured %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-	run sw_vers
-	run uname -m
-	run xcode-select -p
-	run clang --version
-	run rustc --version
-	run cargo --version
-	run rustup show active-toolchain
-	run git --version
-	run git rev-parse HEAD
-	# The two optional tools. Absent is a legitimate answer for both: the suite runs without either.
-	run cargo insta --version
-	run cargo fuzz --version
-	run uv --version
-} >"$evidence/environment.txt"
-echo "==> wrote $evidence/environment.txt"
+# The date of the commit that first added a path, falling back silently to nothing if the path
+# has no history yet (e.g. it's staged but not committed).
+first_commit_date() {
+	git log --follow --diff-filter=A --format='%ad' --date=short -- "$1" | tail -1
+}
 
-{
-	printf 'Captured %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-	run cargo fmt --check
-	run cargo clippy --all-targets -- -D warnings
-	run cargo test
-} >"$evidence/cargo-test.txt"
-echo "==> wrote $evidence/cargo-test.txt"
+# The date of the most recent commit touching a path.
+last_commit_date() {
+	git log -1 --follow --format='%ad' --date=short -- "$1"
+}
 
-# The summary line of every test binary, which is what a reader checks first.
-grep -E "^(test result|running)" "$evidence/cargo-test.txt" || true
+# `cargo test`'s filter is a substring match anywhere in a test's full path, so a bare module
+# prefix over-matches: "sema::" also matches "sema::scope::tests::..." and "sema::types::tests::
+# ...". Rather than rely on a filter string, list every test once and select by exact full name
+# for the unit being generated — unambiguous regardless of how modules nest.
+all_tests="$(cargo test --lib -- --list 2>&1)"
+
+# Writes docs/reports/unit_tests/<report folder>/evidence_<name>.md for one unit.
+#   $1 = the unit's test file, e.g. src/diagnostics/tests.rs or src/lexer/token/tests.rs
+generate_unit() {
+	local test_file="$1"
+	local module_dir rel source_file filter_prefix folder
+	module_dir="$(dirname "$test_file")"
+
+	if [ "$module_dir" = "src" ]; then
+		rel="lib"
+		source_file="src/lib.rs"
+		filter_prefix="tests::"
+	else
+		rel="${module_dir#src/}"
+		if [ -f "${module_dir}.rs" ]; then
+			source_file="${module_dir}.rs"
+		else
+			source_file="${module_dir}/mod.rs"
+		fi
+		filter_prefix="${rel//\//::}::tests::"
+	fi
+
+	folder="$(narrative_folder "$rel")"
+	if [ -z "$folder" ]; then
+		echo "==> skipping $rel: no narrative report claims it yet"
+		return
+	fi
+
+	local out_dir="$out_root/$folder"
+	local name="${rel//\//_}"
+	local report="$out_dir/evidence_${name}.md"
+	mkdir -p "$out_dir"
+
+	local source_written tests_created tests_updated
+	source_written="$(first_commit_date "$source_file")"
+	tests_created="$(first_commit_date "$test_file")"
+	tests_updated="$(last_commit_date "$test_file")"
+
+	local names=()
+	while IFS= read -r found; do
+		names+=("$found")
+	done < <(printf '%s\n' "$all_tests" | grep -E "^${filter_prefix}[^[:space:]]+: test$" | sed -E 's/: test$//')
+
+	{
+		printf '<!-- Automatically generated by scripts/test-evidence.sh on %s -->\n\n' "$run_date"
+		printf '# Test Report — `%s`\n\n' "$rel"
+		printf '## Files\n\n'
+		printf -- '- Source: [`%s`](%s/blob/%s/%s)\n' "$source_file" "$repo_url" "$branch" "$source_file"
+		printf -- '    - Created: %s\n' "$source_written"
+		printf -- '- Tests: [`%s`](%s/blob/%s/%s)\n' "$test_file" "$repo_url" "$branch" "$test_file"
+		printf -- '    - Created: %s\n' "$tests_created"
+		printf -- '    - Updated: %s\n\n' "$tests_updated"
+		printf '## Test Run\n\n'
+		if [ "${#names[@]}" -eq 0 ]; then
+			printf '_No tests matched `%s`._\n' "$filter_prefix"
+		else
+			printf '```\n$ cargo test --lib -- --exact %s...  (%s tests)\n' "$filter_prefix" "${#names[@]}"
+			printf '%s\n' "====================================================================="
+			cargo test --lib -- --exact "${names[@]}" 2>&1 || printf '(exited %s)\n' "$?"
+			printf '```\n'
+		fi
+	} >"$report"
+	echo "==> wrote $report"
+}
+
+if [ "$#" -gt 0 ]; then
+	generate_unit "src/$1/tests.rs"
+else
+	while IFS= read -r test_file; do
+		generate_unit "$test_file"
+	done < <(find src -name tests.rs | sort)
+fi
