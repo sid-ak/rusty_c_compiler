@@ -22,7 +22,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use harness::Verdict;
+use harness::{Exit, Verdict};
 use rustycc::runtime::SHIM_OBJECT;
 
 /// How many programs a plain `cargo test` generates and compares.
@@ -201,9 +201,15 @@ fn generated_programs_are_free_of_undefined_behavior() {
         );
 
         let run = harness::execute(&binary, &directory, harness::timeout());
-        if !run.stderr.is_empty() {
+
+        // Both halves matter. The checker reports what it found on stderr, and with
+        // `-fno-sanitize-recover` it then ends the program — so a run that says nothing and still
+        // does not exit cleanly is a finding this test would otherwise sleep through. Every
+        // generated `main` ends in `return 0`, which is what makes the status worth asserting.
+        if !run.stderr.is_empty() || run.exit != Exit::Code(0) {
             reports.push(format!(
-                "seed {seed}: {}",
+                "seed {seed}: {}, {}",
+                run.exit,
                 String::from_utf8_lossy(&run.stderr)
             ));
         }
