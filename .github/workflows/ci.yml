@@ -96,16 +96,24 @@ jobs:
           path: site/
           retention-days: 7
 
-# Phase 5 adds two more jobs here, wired up by issue #38. They are named now so the shape of the
-# finished pipeline is visible, and so neither is quietly forgotten.
-#
-#  differential:
-#    The clang-oracle suite, one test per corpus program:
-#      cargo test --test differential
-#    See https://github.com/sid-ak/rusty_c_compiler/issues/33
-#
-#  fuzz:
-#    A long run of the lex, parse, and frontend targets on nightly, triggered by `on: schedule`
-#    rather than by a push, because it is measured in minutes per target rather than seconds:
-#      cargo +nightly fuzz run <target>
-#    See https://github.com/sid-ak/rusty_c_compiler/issues/37
+  # The acceptance suite, as its own check.
+  #
+  # `cargo test` above already runs it, so this is a second run of the same thing. That is the
+  # trade, made deliberately: the project's stated definition of done is that every program in the
+  # corpus behaves identically under this compiler and under clang, and a definition of done that
+  # can only be read by opening another job's log and scrolling is one nobody reads. Twenty-five
+  # seconds of runner time buys a line on the pull request that says so directly.
+  differential:
+    name: differential
+    runs-on: macos-14
+    needs: toolchain
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: Compare every corpus program against clang -O0
+        run: cargo test --test differential
+
+# The long runs — fuzzing and a larger generated corpus — are in `nightly.yml`. They are measured in
+# minutes per target rather than seconds, and they need a nightly toolchain, so they are on a
+# schedule rather than on every push.
