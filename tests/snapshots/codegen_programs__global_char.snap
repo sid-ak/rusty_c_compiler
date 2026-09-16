@@ -1,0 +1,24 @@
+---
+source: tests/codegen_programs.rs
+expression: "char c = 'A';\nint answer(void) { return c; }"
+---
+	.section	__TEXT,__text,regular,pure_instructions
+	.globl	_answer
+	.p2align	2
+_answer:
+	stp x29, x30, [sp, #-32]!
+	mov x29, sp
+	adrp x0, _c@PAGE
+	add x0, x0, _c@PAGEOFF
+	ldrsb w0, [x0]
+	b Lanswer_return_0
+Lanswer_return_0:
+	mov sp, x29
+	ldp x29, x30, [sp], #32
+	ret
+	.section	__DATA,__data
+	.globl	_c
+	.p2align	0
+_c:
+	.byte	65
+.subsections_via_symbols

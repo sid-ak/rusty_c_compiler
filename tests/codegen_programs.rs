@@ -20,6 +20,7 @@ use std::process::Command;
 use rustycc::codegen;
 use rustycc::lexer;
 use rustycc::parser;
+use rustycc::runtime::SHIM_OBJECT;
 use rustycc::sema;
 
 /// A scratch directory under Cargo's output directory, unique to `name`.
@@ -771,6 +772,190 @@ int answer(void) { char c = 200; return take(c); }
     assert_eq!(answer_of("char-argument", source), "-56");
 }
 
+/// Compiles `source`, links it with the runtime shim, runs it, and returns stdout.
+///
+/// `source` provides its own `main`, so this is the whole program rather than a function under a
+/// driver. It is what a program printing through `print_string` needs.
+fn output_of(name: &str, source: &str) -> String {
+    let assembly = assemble(source);
+    let directory = scratch(name);
+    let path = directory.join("out.s");
+    let binary = directory.join("program");
+
+    fs::write(&path, &assembly).expect("could not write the assembly");
+
+    let built = Command::new("clang")
+        .args(["-std=c99", "-O0"])
+        .arg(&path)
+        .arg(SHIM_OBJECT)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .expect("could not run clang; run xcode-select --install");
+    assert!(
+        built.status.success(),
+        "linking failed:\n{}\n--- assembly ---\n{assembly}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+
+    let run = Command::new(&binary)
+        .output()
+        .expect("could not run the program");
+    assert!(
+        run.status.success(),
+        "the program exited with {:?}",
+        run.status.code()
+    );
+
+    String::from_utf8_lossy(&run.stdout).into_owned()
+}
+
+/// The declarations of the runtime shim, as a subset-C program writes them.
+const SHIM: &str =
+    "void print_int(int n);\nvoid print_char(char c);\nvoid print_string(char s[]);\n";
+
+/// Globals are read and written, keep their values across calls, and start out as declared.
+#[test]
+fn globals_hold_their_values() {
+    let cases = [
+        (
+            "read an initialized global",
+            "int g = 7;\nint answer(void) { return g; }",
+            "7",
+        ),
+        (
+            "write then read",
+            "int g = 7;\nint answer(void) { g = 9; return g; }",
+            "9",
+        ),
+        (
+            "a negative initializer",
+            "int g = -12345;\nint answer(void) { return g; }",
+            "-12345",
+        ),
+        (
+            "a folded initializer",
+            "int g = 2 * 3 + 1;\nint answer(void) { return g; }",
+            "7",
+        ),
+        (
+            "uninitialized starts at zero",
+            "int g;\nint answer(void) { return g; }",
+            "0",
+        ),
+        (
+            "a char global",
+            "char c = 'A';\nint answer(void) { return c; }",
+            "65",
+        ),
+        (
+            "a char global above 127 is negative",
+            "char c = 200;\nint answer(void) { return c; }",
+            "-56",
+        ),
+        (
+            "written in one function and read in another",
+            "int g;\nvoid put(int n) { g = n; }\nint answer(void) { put(42); return g; }",
+            "42",
+        ),
+    ];
+
+    for (shape, source, expected) in cases {
+        assert_eq!(answer_of(&slug(shape), source), expected, "{shape}");
+    }
+}
+
+/// Global arrays are laid out element by element, zero-filled past their initializer.
+#[test]
+fn global_arrays_are_laid_out_and_iterated() {
+    let cases = [
+        ("read an element", "int a[3] = {4, 5, 6};\nint answer(void) { return a[1]; }", "5"),
+        (
+            "summed in a loop",
+            "int a[4] = {1, 2, 3, 4};\nint answer(void) { int t = 0; for (int i = 0; i < 4; i = i + 1) { t = t + a[i]; } return t; }",
+            "10",
+        ),
+        (
+            "a short initializer zero-fills the rest",
+            "int a[4] = {1, 2};\nint answer(void) { return a[0] + a[1] * 10 + a[2] * 100 + a[3] * 1000; }",
+            "21",
+        ),
+        (
+            "uninitialized is all zeroes",
+            "int a[3];\nint answer(void) { return a[0] + a[1] + a[2]; }",
+            "0",
+        ),
+        (
+            "a char array",
+            "char a[3] = {1, 2, 3};\nint answer(void) { return a[0] + a[1] * 10 + a[2] * 100; }",
+            "321",
+        ),
+        (
+            "a char array from a string literal",
+            "char greeting[6] = \"hello\";\nint answer(void) { return greeting[0] + greeting[4]; }",
+            "215",
+        ),
+        (
+            "the terminator is there",
+            "char greeting[6] = \"hello\";\nint answer(void) { return greeting[5]; }",
+            "0",
+        ),
+        (
+            "written across a call",
+            "int a[3];\nvoid put(int i, int n) { a[i] = n; }\nint answer(void) { put(2, 8); return a[2]; }",
+            "8",
+        ),
+    ];
+
+    for (shape, source, expected) in cases {
+        assert_eq!(answer_of(&slug(shape), source), expected, "{shape}");
+    }
+}
+
+/// A string literal reaches `print_string` as the address of its bytes.
+#[test]
+fn string_literals_print() {
+    let source = format!("{SHIM}int main(void) {{ print_string(\"hello, world\"); return 0; }}\n");
+
+    assert_eq!(output_of("string-literal", &source), "hello, world");
+}
+
+/// Escapes reach stdout as the bytes the lexer decoded, not as the text that was written.
+#[test]
+fn escapes_round_trip_to_their_bytes() {
+    let source = format!(
+        "{SHIM}int main(void) {{ print_string(\"a\\tb\\nq:\\\" s:\\\\ done\"); return 0; }}\n"
+    );
+
+    assert_eq!(output_of("escapes", &source), "a\tb\nq:\" s:\\ done");
+}
+
+/// A literal written twice is one entry in the read-only section, and prints the same both times.
+#[test]
+fn a_repeated_literal_is_interned_once() {
+    let source = format!(
+        "{SHIM}int main(void) {{ print_string(\"twice\"); print_string(\"twice\"); return 0; }}\n"
+    );
+
+    assert_eq!(output_of("interned", &source), "twicetwice");
+
+    let assembly = assemble(&source);
+    assert_eq!(
+        assembly.matches(".asciz").count(),
+        1,
+        "two occurrences should share one entry:\n{assembly}"
+    );
+}
+
+/// A `char` array holding a string is passed to the shim as the pointer it decays to.
+#[test]
+fn a_char_array_prints_as_a_string() {
+    let source =
+        format!("{SHIM}int main(void) {{ char g[6] = \"hello\"; print_string(g); return 0; }}\n");
+
+    assert_eq!(output_of("char-array-string", &source), "hello");
+}
+
 /// Assembles `assembly` with `clang -c -Werror`, failing on anything at all on stderr.
 fn assembles_cleanly(name: &str, assembly: &str) {
     let directory = scratch(name);
@@ -845,6 +1030,16 @@ const CONSTRUCTS: &[(&str, &str)] = &[
     ),
     ("call_nested", "int g(int n) { return n; }\nint f(int a, int b) { return a - b; }\nint answer(void) { return f(g(5), g(2)); }"),
     ("call_recursive", "int f(int n) { if (n <= 1) { return 1; } return n * f(n - 1); }\nint answer(void) { return f(5); }"),
+    ("global_scalar", "int g = -5;\nint answer(void) { return g; }"),
+    ("global_char", "char c = 'A';\nint answer(void) { return c; }"),
+    ("global_array", "int a[3] = {4, 5, 6};\nint answer(void) { return a[0]; }"),
+    ("global_array_short_initializer", "int a[4] = {1, 2};\nint answer(void) { return a[0]; }"),
+    ("global_uninitialized", "int g;\nint a[8];\nint answer(void) { return g + a[0]; }"),
+    (
+        "two_string_literals",
+        "void print_string(char s[]);\nint answer(void) { print_string(\"one\"); print_string(\"two\"); print_string(\"one\"); return 0; }",
+    ),
+    ("local_char_array_from_literal", "int answer(void) { char g[6] = \"hi\"; return g[0]; }"),
 ];
 
 /// The emitted assembly for each construct, pinned so a regression is a readable diff.

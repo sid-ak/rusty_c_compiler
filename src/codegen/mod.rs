@@ -16,11 +16,15 @@ pub mod emit;
 pub mod expr;
 pub mod frame;
 
-use crate::ast::{Block, Expr, ForInit, FuncDef, Item, Program, Stmt, StmtKind};
+use crate::ast::{
+    Block, Expr, ExprKind, ForInit, FuncDef, Initializer, Item, Program, Stmt, StmtKind, VarDecl,
+};
 use crate::codegen::emit::{Emitter, Width};
 use crate::codegen::frame::{requirements, FrameLayout, Requirements};
 use crate::diagnostics::{Diagnostic, DiagnosticKind, Span};
 use crate::sema::annotations::Annotations;
+use crate::sema::constant_value;
+use crate::sema::types::Ty;
 
 /// Where `break` and `continue` go from inside one loop.
 ///
@@ -53,10 +57,14 @@ pub fn generate(program: &Program, annotations: &Annotations) -> Generated {
     let mut generator = Generator::new(annotations);
 
     for item in &program.items {
-        if let Item::FuncDef(def) = item {
-            generator.function(def);
+        match item {
+            Item::FuncDef(def) => generator.function(def),
+            Item::GlobalVar(decl) => generator.global(decl),
+            Item::FuncDecl(_) => {}
         }
     }
+
+    generator.string_table();
 
     generator.finish()
 }
@@ -114,6 +122,162 @@ impl<'a> Generator<'a> {
             span,
             format!("code generation does not yet lower {construct}"),
         ));
+    }
+
+    /// Copies a string literal's bytes into the array at `base`, zeroing whatever it does not fill.
+    ///
+    /// Written out one byte at a time. A copy loop would be shorter in the emitted code and longer
+    /// here, and the arrays this subset can declare are small enough that the trade is not close.
+    fn copy_string_into(&mut self, value: &Expr, declared: &Ty, base: u64) {
+        let ExprKind::StrLit(bytes) = &value.kind else {
+            return;
+        };
+        let Ty::Array(element, count) = declared else {
+            return;
+        };
+        let stride = element.layout().map_or(1, |layout| layout.size);
+        let width = if element.as_ref() == &Ty::Char {
+            Width::Byte
+        } else {
+            Width::Word
+        };
+
+        let mut written = 0u64;
+        for byte in bytes.iter().chain(std::iter::once(&0)) {
+            if written >= u64::from(*count) {
+                break;
+            }
+            self.emitter.load_word_immediate("w0", i32::from(*byte));
+            self.emitter
+                .store_to_frame("w0", width, base.saturating_add(written * stride));
+            written = written.saturating_add(1);
+        }
+
+        // Anything the literal did not reach is zero, the same as a short brace list.
+        self.emitter.instruction("movz w0, #0");
+        while written < u64::from(*count) {
+            self.emitter
+                .store_to_frame("w0", width, base.saturating_add(written * stride));
+            written = written.saturating_add(1);
+        }
+    }
+
+    /// Emits every distinct string literal the program used, under the label analysis interned it to.
+    ///
+    /// One entry per distinct literal, so two occurrences of `"hello"` share one run of bytes in
+    /// the read-only section. The bytes are the ones the lexer decoded; nothing here re-reads an
+    /// escape from the source text.
+    fn string_table(&mut self) {
+        for literal in self.annotations.strings() {
+            self.emitter.define_string(&literal.label, &literal.bytes);
+        }
+    }
+
+    /// Emits one global variable, into the data section or the zero-filled one.
+    fn global(&mut self, decl: &VarDecl) {
+        let Some(symbol) = self
+            .annotations
+            .binding_of(decl.id)
+            .and_then(|id| self.annotations.symbol(id))
+        else {
+            self.unlowered(decl.span, "a global with no binding");
+
+            return;
+        };
+        let name = symbol.name.clone();
+        let ty = symbol.ty.clone();
+        let Some(layout) = ty.layout() else {
+            self.unlowered(decl.span, "a global whose type has no storage");
+
+            return;
+        };
+
+        let Some(init) = &decl.init else {
+            // Nothing to write. `.zerofill` records the size and the loader provides the zeroes,
+            // so a large uninitialized array costs nothing in the object file.
+            self.emitter
+                .reserve_zeroed(&name, layout.size, power_of_two(layout.align));
+
+            return;
+        };
+
+        self.emitter.begin_data(&name, power_of_two(layout.align));
+
+        let (element, count) = match &ty {
+            Ty::Array(element, count) => (element.as_ref().clone(), u64::from(*count)),
+            scalar => (scalar.clone(), 1),
+        };
+        let stride = element.layout().map_or(1, |layout| layout.size);
+        let written = self.global_values(decl, init, &element, count);
+
+        // An initializer shorter than the array leaves the rest zeroed, which is what C says a
+        // partial brace list means.
+        self.emitter
+            .data_zero(count.saturating_sub(written).saturating_mul(stride));
+    }
+
+    /// Writes the values in `init`, returning how many elements were written.
+    fn global_values(
+        &mut self,
+        decl: &VarDecl,
+        init: &Initializer,
+        element: &Ty,
+        count: u64,
+    ) -> u64 {
+        match init {
+            // A string literal filling a `char` array is written as its decoded bytes, terminator
+            // included, rather than as a reference to the read-only copy.
+            Initializer::Expr(value) => {
+                if let ExprKind::StrLit(bytes) = &value.kind {
+                    let mut written = 0;
+                    for byte in bytes.iter().chain(std::iter::once(&0)) {
+                        if written >= count {
+                            break;
+                        }
+                        self.emitter.data_byte(i32::from(*byte));
+                        written = written.saturating_add(1);
+                    }
+
+                    return written;
+                }
+
+                self.global_element(decl, value, element);
+
+                1
+            }
+            Initializer::List { elements, .. } => {
+                let mut written = 0;
+                for value in elements {
+                    if written >= count {
+                        break;
+                    }
+                    self.global_element(decl, value, element);
+                    written = written.saturating_add(1);
+                }
+
+                written
+            }
+        }
+    }
+
+    /// Writes one constant value at the element type's width.
+    fn global_element(&mut self, decl: &VarDecl, value: &Expr, element: &Ty) {
+        let Some(folded) = constant_value(value) else {
+            // Analysis rejects a non-constant global initializer, so reaching here is a gap in the
+            // compiler rather than a problem with the program.
+            self.unlowered(
+                decl.span,
+                "a global initializer that did not fold to a constant",
+            );
+
+            return;
+        };
+
+        if element == &Ty::Char {
+            self.emitter.data_byte(folded);
+        } else {
+            self.emitter.data_word(folded);
+        }
     }
 
     /// Lowers one function definition, from its prologue to its single epilogue.
@@ -317,14 +481,25 @@ impl<'a> Generator<'a> {
 
             return;
         };
+        let declared = self
+            .annotations
+            .symbol(symbol)
+            .map_or(Ty::Int, |symbol| symbol.ty.clone());
 
         match init {
-            crate::ast::Initializer::Expr(value) => {
+            // A string literal filling a `char` array is a copy of its bytes, not a reference to
+            // the read-only one. Evaluating it as an expression would produce the literal's
+            // address, and storing that into the array would put a fragment of a pointer where the
+            // text should be.
+            Initializer::Expr(value) if fills_an_array(value, &declared) => {
+                self.copy_string_into(value, &declared, base);
+            }
+            Initializer::Expr(value) => {
                 let width = self.width_of(value.id);
                 self.expr(value);
                 self.emitter.store_to_frame("w0", width, base);
             }
-            crate::ast::Initializer::List { elements, .. } => {
+            Initializer::List { elements, .. } => {
                 let width = self.element_width(decl.id);
                 let stride = element_stride(width);
 
@@ -339,6 +514,24 @@ impl<'a> Generator<'a> {
                 }
             }
         }
+    }
+}
+
+/// Whether `init` is a string literal filling an array rather than a value being assigned.
+fn fills_an_array(init: &Expr, declared: &Ty) -> bool {
+    matches!(init.kind, ExprKind::StrLit(_)) && matches!(declared, Ty::Array(_, _))
+}
+
+/// The power of two that `alignment` is, which is what `.p2align` wants.
+fn power_of_two(alignment: u64) -> u32 {
+    match alignment {
+        1 => 0,
+        2 => 1,
+        4 => 2,
+        8 => 3,
+        // Nothing in this subset aligns more strictly than a pointer; sixteen is the safe answer
+        // for anything that somehow did, since over-aligning is never wrong.
+        _ => 4,
     }
 }
 

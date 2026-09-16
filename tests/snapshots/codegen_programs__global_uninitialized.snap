@@ -1,0 +1,36 @@
+---
+source: tests/codegen_programs.rs
+expression: "int g;\nint a[8];\nint answer(void) { return g + a[0]; }"
+---
+	.section	__TEXT,__text,regular,pure_instructions
+	.globl	_answer
+	.p2align	2
+_answer:
+	stp x29, x30, [sp, #-48]!
+	mov x29, sp
+	adrp x0, _g@PAGE
+	add x0, x0, _g@PAGEOFF
+	ldr w0, [x0]
+	str w0, [x29, #16]
+	adrp x0, _a@PAGE
+	add x0, x0, _a@PAGEOFF
+	str x0, [x29, #24]
+	movz w0, #0
+	sxtw x1, w0
+	ldr x0, [x29, #24]
+	movz x2, #4
+	madd x0, x1, x2, x0
+	ldr w0, [x0]
+	mov w1, w0
+	ldr w0, [x29, #16]
+	add w0, w0, w1
+	b Lanswer_return_0
+Lanswer_return_0:
+	mov sp, x29
+	ldp x29, x30, [sp], #48
+	ret
+	.globl	_g
+.zerofill __DATA,__bss,_g,4,2
+	.globl	_a
+.zerofill __DATA,__bss,_a,32,2
+.subsections_via_symbols

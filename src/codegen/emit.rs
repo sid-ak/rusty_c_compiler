@@ -289,6 +289,38 @@ impl Emitter {
         self.define_data(name, global, 2, &format!(".long\t{value}"));
     }
 
+    /// Opens a global datum: its linkage, its alignment, and its label.
+    ///
+    /// The value follows as one or more of [`data_word`](Emitter::data_word),
+    /// [`data_byte`](Emitter::data_byte) and [`data_zero`](Emitter::data_zero), because an array is
+    /// written element by element and may be shorter than the storage it was declared with.
+    pub fn begin_data(&mut self, name: &str, align: u32) {
+        let symbol = Self::symbol(name);
+
+        self.line(Section::Data, &format!(".globl\t{symbol}"));
+        self.line(Section::Data, &format!(".p2align\t{align}"));
+        let _ = writeln!(self.buffer(Section::Data), "{symbol}:");
+    }
+
+    /// Four bytes of initialized data.
+    pub fn data_word(&mut self, value: i32) {
+        self.line(Section::Data, &format!(".long\t{value}"));
+    }
+
+    /// One byte of initialized data.
+    pub fn data_byte(&mut self, value: i32) {
+        self.line(Section::Data, &format!(".byte\t{value}"));
+    }
+
+    /// `bytes` zeroed bytes, for the part of an array an initializer did not reach.
+    pub fn data_zero(&mut self, bytes: u64) {
+        if bytes == 0 {
+            return;
+        }
+
+        self.line(Section::Data, &format!(".space\t{bytes}"));
+    }
+
     /// Defines a global run of bytes, for a `char` array or an array's initializer image.
     pub fn define_bytes(&mut self, name: &str, bytes: &[u8], align: u32, global: bool) {
         let body = format!(".ascii\t\"{}\"", escape(bytes));

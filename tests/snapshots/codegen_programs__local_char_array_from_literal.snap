@@ -1,0 +1,37 @@
+---
+source: tests/codegen_programs.rs
+expression: "int answer(void) { char g[6] = \"hi\"; return g[0]; }"
+---
+	.section	__TEXT,__text,regular,pure_instructions
+	.globl	_answer
+	.p2align	2
+_answer:
+	stp x29, x30, [sp, #-48]!
+	mov x29, sp
+	movz w0, #104
+	strb w0, [x29, #16]
+	movz w0, #105
+	strb w0, [x29, #17]
+	movz w0, #0
+	strb w0, [x29, #18]
+	movz w0, #0
+	strb w0, [x29, #19]
+	strb w0, [x29, #20]
+	strb w0, [x29, #21]
+	add x0, x29, #16
+	str x0, [x29, #24]
+	movz w0, #0
+	sxtw x1, w0
+	ldr x0, [x29, #24]
+	movz x2, #1
+	madd x0, x1, x2, x0
+	ldrsb w0, [x0]
+	b Lanswer_return_0
+Lanswer_return_0:
+	mov sp, x29
+	ldp x29, x30, [sp], #48
+	ret
+	.section	__TEXT,__cstring,cstring_literals
+l_.str.0:
+	.asciz	"hi"
+.subsections_via_symbols
