@@ -65,6 +65,12 @@ and no generated expression assigns to anything, so there is nothing to sequence
 undefined-behavior sanitizer runs over a sample of the programs, which is the check on that reasoning
 being right rather than only careful.
 
+The same reasoning is applied to how long a program runs. Nothing else bounds a loop inside a loop
+inside a function called from a loop, and a generated program that does not finish has no output to
+compare — so each statement is charged the product of the loop bounds around it, each call is
+charged whatever the callee was estimated at, and past a budget the generator stops offering loops
+and calls.
+
 A seed reproduces its program byte for byte, so a failure is a number rather than a story about a
 run that already finished. A failing seed's program is minimized and checked in as a permanent
 fixture, so a bug found once can never silently regress.

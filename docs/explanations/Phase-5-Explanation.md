@@ -279,22 +279,40 @@ generated programs is also compiled with `clang -fsanitize=undefined`, which ins
 to complain at runtime if it does any of these things. Finding nothing is the check on the reasoning
 being right rather than only careful.
 
-Three bounds in the generator exist because their absence was found the hard way, each as a stack
-overflow:
+Four bounds in the generator exist because their absence was found the hard way.
+
+Two were stack overflows, both from the same shape — a rule that generates its own contents from the
+list it came from:
 
 - Statement nesting, because a statement that opens a block generates that block from the same list
   of statements it came from.
 - Call nesting, because a call's arguments come from the same expression grammar the call is a leaf
   of.
-- The scope of names declared inside a block — not a crash, but the generator went on offering a
-  variable after its closing brace and wrote programs that did not compile.
 
-A fourth correction was about volume rather than termination. The first version printed from
-everywhere, and a loop inside a loop inside a function called from a loop produced seventeen
-megabytes of output — which the harness then reported as a stdout difference between two programs
-that had both been killed at the timeout. Now only the top level of `main` prints; everything
-computed inside a loop or a function folds into a single global, which `main` prints at the end. The
-fold is order-sensitive, so a wrong value anywhere still changes it.
+The third was not a crash. Names declared inside a block stayed in the generator's idea of what was
+in scope after the closing brace, so it went on offering a variable that no longer existed and wrote
+programs that did not compile — which the harness dutifully reported as `rustycc` refusing to build
+them, an answer that was correct and about the wrong thing entirely.
+
+The fourth is the one worth reading. The generator reasons about the values an expression can take
+so that its programs have a defined answer; nothing made it reason about how much *work* it had
+asked for. A soak of two and a half thousand programs found three that ran past the harness's
+ten-second limit — a loop inside a loop inside a function called from a loop, where a call that is
+one statement to look at is a hundred thousand to run. One of the three finished under `clang` and
+not under `rustycc`, which is an honest difference between a compiler that allocates registers and
+one that spills everything to the stack, and no use at all as a test: a program that does not finish
+has no output to compare.
+
+The fix is the same technique as the value intervals, applied to time. Each statement costs the
+product of the loop bounds around it, a call costs whatever the callee was estimated at, and past a
+budget the generator stops offering loops and calls.
+
+A fifth correction was about volume rather than termination. The first version printed from
+everywhere, and the same runaway shape produced seventeen megabytes of output — which the harness
+then reported as a stdout difference between two programs that had both been killed at the timeout.
+Now only the top level of `main` prints; everything computed inside a loop or a function folds into a
+single global, which `main` prints at the end. The fold is order-sensitive, so a wrong value anywhere
+still changes it.
 
 Everything is seeded: the same seed produces byte-identical source, and a failure prints its seed.
 That turns a failure from a story about a run that has already finished into a file.
@@ -366,6 +384,11 @@ Assert over each case, not over a fold of them.
 that shapes the whole phase: the corpus, the generator's interval arithmetic, and the decision to
 check what `clang` warns about rather than only whether it succeeds. An oracle is only an oracle
 where an answer exists.
+
+**Reason about cost the way you reason about values.** The generator's interval arithmetic made its
+programs *correct*; nothing made them *finish*. Both are properties of a generated program that a
+test depends on, and only one of them had been thought about — which is why three programs in two
+and a half thousand were useless as tests and looked like compiler bugs.
 
 **Say which thing went wrong, not that something did.** A mismatch, a program one compiler would not
 build, and a program that never finished are three different situations with three different next
