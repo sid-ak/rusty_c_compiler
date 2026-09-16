@@ -1,8 +1,8 @@
 //! Snapshots of the annotation set for the test corpus, and the checks that keep it honest.
 //!
 //! What the analyzer records matters more than what it rejects: it is the entire interface between
-//! the front end and code generation, and a gap in it becomes a missing lookup in Phase 4 rather
-//! than an error message here. Snapshotting it turns any change to that interface into a readable
+//! the front end and code generation, and a gap in it becomes a missing lookup during code
+//! generation rather than an error message here. Snapshotting it turns any change to that interface into a readable
 //! diff over real programs.
 
 // clippy.toml exempts test code from the panic-adjacent lints, but only inside `#[test]` bodies;

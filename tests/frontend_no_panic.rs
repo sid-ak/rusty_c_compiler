@@ -1,7 +1,8 @@
 //! The front end never panics and never hangs, whatever it is handed.
 //!
-//! Phase 5 puts this property under `cargo-fuzz`, which needs a nightly toolchain and minutes per
-//! run. This is the cheap precursor: it takes the programs already in the corpus, cuts each one
+//! `cargo-fuzz` puts this property under generated input, which needs a nightly toolchain and
+//! minutes per run. This is the cheap precursor that runs on every change: it takes the programs
+//! already in the corpus, cuts each one
 //! short at every possible point, and parses each of the fragments. A prefix of a valid program is
 //! exactly the shape of input a parser mishandles — a construct opened and never closed — and
 //! generating them costs nothing because the programs are already written.
@@ -69,7 +70,7 @@ fn programs(directory: &str) -> Vec<PathBuf> {
 ///
 /// The lexer's diagnostics are not a reason to stop: the parser has to cope with whatever token
 /// stream it is handed, and a stream that came out of malformed text is precisely the interesting
-/// case. This mirrors what the Phase 5 `parse` fuzz target will do.
+/// case. This is the deterministic version of what the `parse` fuzz target does.
 fn parse(source: &[u8]) -> usize {
     let lexed = lexer::lex(source);
     let parsed = parser::parse(&lexed.tokens);
@@ -110,7 +111,7 @@ fn finishes_within<T: Send + 'static>(
 
 /// A token stream that does not end in `Eof` parses exactly as the same stream with it.
 ///
-/// Only the lexer promises that trailing `Eof`; `parser::parse` is public and the Phase 5 fuzz
+/// Only the lexer promises that trailing `Eof`; `parser::parse` is public and the fuzz
 /// targets hand it arbitrary slices, so it must not rely on it — not to terminate, and not to know
 /// where the input ends when it points a diagnostic there. Every token-boundary prefix of the corpus
 /// is checked, so the prefixes that end mid-construct exercise every recovery loop.

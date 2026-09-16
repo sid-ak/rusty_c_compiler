@@ -54,6 +54,21 @@ const EXPRESSION_BOUND: i64 = 1 << 29;
 /// How many elements every generated array has.
 const ARRAY_LENGTH: usize = 8;
 
+/// Roughly how many statement executions one generated program may cost.
+///
+/// The value intervals above keep a program's *answer* defined; this keeps its *runtime* finite.
+/// Nothing rules out a loop inside a loop inside a function called from a loop, and the first
+/// version of this generator wrote exactly that: three of two and a half thousand programs ran past
+/// the harness's ten-second limit, one of them finishing under `clang` and not under `rustycc` —
+/// which is an honest difference between the two compilers and no use at all as a test, since a
+/// program that does not finish has no output to compare.
+///
+/// So the generator carries a running estimate of how much work it has asked for, computed the same
+/// way the value intervals are: each statement costs the product of the loop bounds around it, and
+/// a call costs whatever the callee was estimated at. Past the budget it stops offering loops and
+/// calls and writes plain statements instead.
+const WORK_BUDGET: u64 = 200_000;
+
 /// How deeply a call's arguments may themselves contain calls.
 ///
 /// Nested calls are worth generating — placing an argument register and then evaluating the next
@@ -199,6 +214,8 @@ struct Function {
     name: String,
     /// How many `int` parameters it takes.
     arity: usize,
+    /// The estimated cost of one call to it, in statement executions.
+    cost: u64,
 }
 
 /// The state of one program being built.
@@ -225,6 +242,13 @@ pub struct Generator {
     blocks: usize,
     /// How many calls the expression being generated is already inside the argument list of.
     calls: usize,
+    /// The estimated cost of the function being generated, in statement executions.
+    cost: u64,
+    /// The product of the bounds of the loops the statement being generated is inside.
+    ///
+    /// One statement written inside two loops of eight runs sixty-four times, so it is charged
+    /// sixty-four rather than one.
+    multiplier: u64,
     /// Whether the statement being generated is in `main` rather than in a helper function.
     ///
     /// Together with the loop depth, this is what decides whether a computation may print itself or
@@ -257,6 +281,8 @@ impl Generator {
             loops: 0,
             blocks: 0,
             calls: 0,
+            cost: 0,
+            multiplier: 1,
             in_main: false,
         }
     }
@@ -315,6 +341,8 @@ impl Generator {
 
         let outer_scalars = self.scalars.len();
         let outer_arrays = self.arrays.len();
+        self.cost = 0;
+        self.multiplier = 1;
 
         let mut parameters = Vec::new();
         for _ in 0..arity {
@@ -355,7 +383,13 @@ impl Generator {
 
         self.scalars.truncate(outer_scalars);
         self.arrays.truncate(outer_arrays);
-        self.functions.push(Function { name, arity });
+        self.functions.push(Function {
+            name,
+            arity,
+            // At least one: a function that does nothing still costs a call, and a cost of zero
+            // would let it be called from inside a loop without limit.
+            cost: self.cost.max(1),
+        });
     }
 
     /// Emits `main`, which does the same work as any other function and then prints what it found.
@@ -366,6 +400,8 @@ impl Generator {
         self.line("int main(void) {");
         self.indent += 1;
         self.in_main = true;
+        self.cost = 0;
+        self.multiplier = 1;
 
         let outer_scalars = self.scalars.len();
         let outer_arrays = self.arrays.len();
@@ -425,7 +461,10 @@ impl Generator {
     /// The three forms that open a block are only offered while there is depth left for them, since
     /// each one generates its body from this same list.
     fn statement(&mut self) {
-        let forms = if self.blocks < MAX_BLOCK_DEPTH { 9 } else { 6 };
+        self.cost = self.cost.saturating_add(self.multiplier);
+
+        let nesting_left = self.blocks < MAX_BLOCK_DEPTH && self.cost < WORK_BUDGET;
+        let forms = if nesting_left { 9 } else { 6 };
 
         match self.rng.choose(forms) {
             0 => self.declaration(),
@@ -504,6 +543,7 @@ impl Generator {
         ));
 
         let outer = self.scalars.len();
+        let outer_multiplier = self.multiplier;
         self.scalars.push(Variable {
             name: counter,
             low: 0,
@@ -512,7 +552,9 @@ impl Generator {
         });
         self.indent += 1;
         self.loops += 1;
+        self.multiplier = self.multiplier.saturating_mul(limit.max(1) as u64);
         self.body();
+        self.multiplier = outer_multiplier;
         self.loops -= 1;
         self.indent -= 1;
         self.scalars.truncate(outer);
@@ -533,8 +575,11 @@ impl Generator {
         self.indent += 1;
         self.line(&format!("{counter} = {counter} + 1;"));
 
+        let outer_multiplier = self.multiplier;
         self.loops += 1;
+        self.multiplier = self.multiplier.saturating_mul(limit.max(1) as u64);
         self.body();
+        self.multiplier = outer_multiplier;
         self.loops -= 1;
 
         self.indent -= 1;
@@ -875,6 +920,14 @@ impl Generator {
             return None;
         }
         let function = self.functions[self.rng.below(self.functions.len())].clone();
+
+        // A call inside a loop runs once per iteration, and the callee has loops of its own. This
+        // is the product that ran away: a cheap-looking call in a triply nested loop is not cheap.
+        let charge = self.multiplier.saturating_mul(function.cost);
+        if self.cost.saturating_add(charge) > WORK_BUDGET {
+            return None;
+        }
+        self.cost = self.cost.saturating_add(charge);
 
         self.calls += 1;
         let arguments = (0..function.arity)
