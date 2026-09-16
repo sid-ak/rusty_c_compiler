@@ -2,8 +2,8 @@
 //!
 //! A unit test proves one production in isolation; a snapshot proves they compose, and turns a
 //! regression anywhere in the parser into a readable diff rather than one failed assertion. The
-//! corpus these run over is the same `tests/programs/` that Phase 4 executes and Phase 5 compares
-//! against `clang`, so a program earns its keep more than once.
+//! corpus these run over is the same `tests/programs/` that the golden tier executes and the
+//! differential tier compares against `clang`, so a program earns its keep more than once.
 
 // clippy.toml exempts test code from the panic-adjacent lints, but only inside `#[test]` bodies;
 // the helpers below are test scaffolding too, and a corpus file that cannot be read is a broken

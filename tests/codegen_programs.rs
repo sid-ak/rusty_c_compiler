@@ -379,6 +379,52 @@ fn arrays_index_read_and_write() {
     }
 }
 
+/// A brace list shorter than the array zeroes every element it does not reach.
+///
+/// C says the elements a short initializer does not mention are zero, and for a global that falls
+/// out of the data section being zero to begin with. A local's storage is whatever the stack
+/// happened to be holding, so the zeros have to be written — and a compiler that only stores the
+/// elements it was given passes every test that reads back one of them.
+#[test]
+fn a_short_initializer_list_zeroes_the_rest() {
+    let cases = [
+        (
+            "one element of four",
+            "int a[4] = {5}; return a[0] + a[1] + a[2] + a[3];",
+            "5",
+        ),
+        (
+            "the elements past the list are individually zero",
+            "int a[4] = {1, 2}; return a[2] * 10 + a[3];",
+            "0",
+        ),
+        (
+            "a full list leaves nothing to zero",
+            "int a[3] = {1, 2, 3}; return a[0] + a[1] * 10 + a[2] * 100;",
+            "321",
+        ),
+        (
+            "an empty list zeroes the whole array",
+            "int a[3] = {}; return a[0] + a[1] + a[2];",
+            "0",
+        ),
+        (
+            "a char array zeroes at its own stride",
+            "char c[4] = {'a'}; return c[0] + c[1] + c[2] + c[3];",
+            "97",
+        ),
+        (
+            "the tail is zero even after the stack has been used",
+            "int used[4]; for (int i = 0; i < 4; i = i + 1) { used[i] = 999; }              int a[4] = {5}; return a[1] + a[2] + a[3] + used[0] - 999;",
+            "0",
+        ),
+    ];
+
+    for (shape, body, expected) in cases {
+        assert_eq!(answer(&slug(shape), body), expected, "{shape}");
+    }
+}
+
 /// A `char` occupies one byte and sign-extends when it is read back.
 #[test]
 fn chars_store_in_one_byte_and_sign_extend() {

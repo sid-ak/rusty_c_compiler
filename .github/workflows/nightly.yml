@@ -1,0 +1,107 @@
+name: Nightly
+
+# The runs that are too long for a push.
+#
+# Fuzzing is measured in minutes per target and a generated corpus is worth more the longer it runs,
+# so neither belongs on the path between a commit and a review. They run once a day instead, and can
+# be started by hand from the Actions tab when a change deserves one before it is merged — which is
+# also the only way to run them from a branch, since a scheduled workflow only ever runs from the
+# default branch.
+on:
+  schedule:
+    # 04:00 UTC, which is the middle of the night in the time zone this is developed in and well
+    # clear of the hour, where every other project's cron jobs are.
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzz_seconds:
+        description: "Seconds to run each fuzz target"
+        required: false
+        default: "1800"
+      generated_programs:
+        description: "How many random programs to compare against clang"
+        required: false
+        default: "2000"
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The fuzz crate is its own workspace, so `cargo fmt` and `cargo clippy` at the repository root do
+  # not reach it and the pull-request checks say nothing about it. It is linted here, where nightly
+  # is installed anyway, rather than left as the one directory nothing checks.
+  lint:
+    name: lint the fuzz targets
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the nightly toolchain
+        run: rustup toolchain install nightly --profile minimal --component rustfmt clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - run: cargo +nightly fmt --check
+        working-directory: fuzz
+      - run: cargo +nightly clippy --all-targets -- -D warnings
+        working-directory: fuzz
+
+  fuzz:
+    name: fuzz ${{ matrix.target }}
+    runs-on: macos-14
+    strategy:
+      # Every target runs even if one of them finds something. A crash in the parser says nothing
+      # about whether the lexer is clean, and finding out in the same run is worth more than
+      # stopping early.
+      fail-fast: false
+      matrix:
+        target: [lex, parse, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      # cargo-fuzz needs nightly and a sanitizer-instrumented build. The compiler itself stays on
+      # the pinned stable toolchain; nightly exists for this job alone.
+      - name: Install the nightly toolchain and cargo-fuzz
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo install cargo-fuzz --locked
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            fuzz
+
+      - name: Fuzz ${{ matrix.target }}
+        run: ./scripts/fuzz.sh ${{ matrix.target }} ${{ inputs.fuzz_seconds || '1800' }}
+
+      # A crash is a file, and a file that only exists on a runner that has been torn down is a
+      # crash nobody can reproduce. Uploaded whether or not the step above failed, because libfuzzer
+      # writes the input it died on before it exits.
+      - name: Keep whatever it crashed on
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  generated:
+    name: generated corpus
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+
+      # Far more programs than a push can afford, from the same starting seed. A longer run covers
+      # more by counting further from the same place rather than by starting somewhere new, so a
+      # failure here is reproducible from the seed the failure prints.
+      - name: Compare a large generated corpus against clang
+        env:
+          RUSTYCC_GENERATED_PROGRAMS: ${{ inputs.generated_programs || '2000' }}
+        run: cargo test --test generated -- --nocapture

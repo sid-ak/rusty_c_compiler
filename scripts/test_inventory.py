@@ -1,0 +1,233 @@
+#!/usr/bin/env python3
+"""Fill in each unit test report's table of tests, from the tests themselves.
+
+Every test in this repository carries a doc comment stating the behavior it pins — that is a rule in
+`AGENTS.md`, enforced for the crate by `#![deny(missing_docs)]`. So the table of tests in a unit test
+report is already written; it just lives next to the code. Copying it by hand into a document is how
+a document starts disagreeing with the code it describes, which is worse than having no table.
+
+Each report marks where its table goes:
+
+    <!-- inventory: src/lexer/tests.rs -->
+    ...generated rows...
+    <!-- end inventory -->
+
+Running this script rewrites what is between the markers. `--check` reports what is out of date
+instead of writing, which is what the documentation build runs, so a test added without its report
+being refreshed fails the build rather than going unnoticed.
+
+Every file of tests in the repository has to be claimed by exactly one report. A file claimed twice
+would be counted twice; a file claimed by nobody is a unit with no report, which is the omission this
+check exists to catch and the reason it is not enough to regenerate only the tables that exist.
+
+Usage:
+    scripts/test_inventory.py           rewrite every report's table
+    scripts/test_inventory.py --check   exit 1 if any table or claim is out of date
+"""
+
+import os
+import re
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPORTS = os.path.join(ROOT, "docs", "reports", "unit_tests")
+
+OPEN = re.compile(r"<!-- inventory: (.+?) -->")
+CLOSE = "<!-- end inventory -->"
+
+# Test files that are deliberately not a unit's own report. `tests/codegen_exec.rs` and
+# `tests/differential.rs` declare one test per corpus program from a generated list, so their
+# contents are the corpus rather than a set of named tests; `tests/programs/COVERAGE.md` is where
+# that is written down.
+UNCLAIMED_BY_DESIGN = {
+    "tests/codegen_exec.rs",
+    "tests/differential.rs",
+}
+
+
+def test_files():
+    """Every file in the repository that declares a `#[test]`."""
+    found = []
+
+    for base, _, names in os.walk(os.path.join(ROOT, "src")):
+        for name in names:
+            if name.endswith(".rs"):
+                found.append(os.path.relpath(os.path.join(base, name), ROOT))
+    for name in sorted(os.listdir(os.path.join(ROOT, "tests"))):
+        if name.endswith(".rs"):
+            found.append(os.path.join("tests", name))
+
+    return sorted(path for path in found if "#[test]" in read(path))
+
+
+def read(path):
+    """The contents of a file, by its path relative to the repository root."""
+    with open(os.path.join(ROOT, path), encoding="utf-8") as handle:
+        return handle.read()
+
+
+def tests_in(path):
+    """Every test in one file, as (name, the first line of its doc comment)."""
+    lines = read(path).split("\n")
+    found = []
+
+    for index, line in enumerate(lines):
+        if line.strip() != "#[test]":
+            continue
+
+        summary = doc_above(lines, index)
+        name = name_below(lines, index)
+        if name is not None:
+            found.append((name, summary))
+
+    return found
+
+
+def doc_above(lines, index):
+    """The first paragraph of the doc comment above line `index`, as one line."""
+    paragraph = []
+    cursor = index - 1
+
+    while cursor >= 0:
+        stripped = lines[cursor].strip()
+        if stripped.startswith("///"):
+            paragraph.insert(0, stripped[3:].strip())
+        elif stripped.startswith("#["):
+            pass
+        else:
+            break
+        cursor -= 1
+
+    # Only the summary: rustdoc's own convention is that the first paragraph stands alone, and the
+    # rest is the reasoning, which belongs in the report's prose rather than in a table cell.
+    summary = []
+    for line in paragraph:
+        if not line:
+            break
+        summary.append(line)
+
+    return " ".join(summary).replace("|", "\\|")
+
+
+def name_below(lines, index):
+    """The name of the function declared just below line `index`."""
+    for cursor in range(index + 1, min(index + 6, len(lines))):
+        match = re.search(r"fn\s+([a-zA-Z0-9_]+)", lines[cursor])
+        if match:
+            return match.group(1)
+
+    return None
+
+
+def table_for(paths):
+    """The generated rows for one report, over every file it claims."""
+    rows = [
+        "| # | Test | What it pins |",
+        "| --- | --- | --- |",
+    ]
+    number = 0
+
+    for path in paths:
+        for name, summary in tests_in(path):
+            number += 1
+            rows.append(f"| {number} | `{name}` | {summary} |")
+
+    return "\n".join(rows)
+
+
+def reports():
+    """Every report file, in the order they are numbered."""
+    return sorted(
+        name for name in os.listdir(REPORTS) if name.endswith(".md") and name != "index.md"
+    )
+
+
+def rewrite(name, check):
+    """Rewrite one report's tables, or report whether they are out of date."""
+    path = os.path.join(REPORTS, name)
+    with open(path, encoding="utf-8") as handle:
+        original = handle.read()
+
+    claimed = []
+    updated = []
+    cursor = 0
+
+    while True:
+        opening = OPEN.search(original, cursor)
+        if opening is None:
+            updated.append(original[cursor:])
+            break
+
+        closing = original.find(CLOSE, opening.end())
+        if closing == -1:
+            raise SystemExit(f"{name}: an inventory block was opened and never closed")
+
+        paths = [piece.strip() for piece in opening.group(1).split(",")]
+        claimed.extend(paths)
+        for path_claimed in paths:
+            if not os.path.exists(os.path.join(ROOT, path_claimed)):
+                raise SystemExit(f"{name}: claims {path_claimed}, which does not exist")
+
+        updated.append(original[cursor : opening.end()])
+        updated.append("\n" + table_for(paths) + "\n")
+        cursor = closing
+
+    rebuilt = "".join(updated)
+    if rebuilt == original:
+        return claimed, False
+
+    if not check:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(rebuilt)
+
+    return claimed, True
+
+
+def main(argv):
+    """Rewrite every report's table, or with `--check` report the ones that are out of date."""
+    check = argv[1:] == ["--check"]
+    stale = []
+    claimed = []
+
+    for name in reports():
+        names, changed = rewrite(name, check)
+        claimed.extend(names)
+        if changed:
+            stale.append(name)
+
+    duplicated = sorted({path for path in claimed if claimed.count(path) > 1})
+    unclaimed = sorted(set(test_files()) - set(claimed) - UNCLAIMED_BY_DESIGN)
+
+    for path in duplicated:
+        print(f"{path} is claimed by more than one report", file=sys.stderr)
+    for path in unclaimed:
+        print(f"{path} has tests but no unit test report claims it", file=sys.stderr)
+
+    if check:
+        for name in stale:
+            print(f"{name}: its table of tests is out of date", file=sys.stderr)
+        if stale or duplicated or unclaimed:
+            print(
+                "run scripts/test_inventory.py to refresh the unit test reports",
+                file=sys.stderr,
+            )
+
+            return 1
+
+        print(f"unit test reports are current ({len(claimed)} files of tests claimed)")
+
+        return 0
+
+    if duplicated or unclaimed:
+        return 1
+
+    for name in stale:
+        print(f"refreshed {name}")
+    if not stale:
+        print("unit test reports were already current")
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

@@ -30,3 +30,5 @@ They sit alongside the other documents rather than replacing any of them:
   makes sense, and writing down everything the backend will need to know about it.
 - [Phase 4 — ARM64 code generation and the driver](Phase-4-Explanation.md): turning that annotated
   tree into instructions a processor runs, and into a file that runs them.
+- [Phase 5 — Differential testing, fuzzing, and acceptance](Phase-5-Explanation.md): asking a second
+  compiler what every test program should do, and finding out what arbitrary input does to this one.

@@ -5,10 +5,16 @@
 /site/
 /.venv/
 
-# Fuzzing
+# Fuzzing. The seed corpus is not checked in either: scripts/fuzz.sh builds it from tests/programs/,
+# tests/adversarial/, and fuzz/regressions/, which are already in the repository. A second copy of
+# those files under fuzz/ would be one more thing to keep in step with them, and it would go stale
+# the first time a program was added. What libfuzzer adds to the corpus during a run is
+# machine-specific and regenerable; what it crashes on is minimized by hand into fuzz/regressions/,
+# which is tracked.
 /fuzz/target/
 /fuzz/corpus/
 /fuzz/artifacts/
+/fuzz/coverage/
 
 # macOS
 .DS_Store

@@ -80,22 +80,38 @@ pass.
   and `clippy::indexing_slicing` lints are denied in `src/` and allowed in tests.
 - Add a new subset-C test program to `tests/programs/` together with its entry in
   `tests/programs/COVERAGE.md`; a program without a matrix entry fails CI.
+- Every unit of the compiler has a report in `docs/reports/unit_tests/`, and the table of tests in
+  each one is generated from the tests' own doc comments by `scripts/test_inventory.py`. Adding a
+  file of tests that no report claims fails the documentation build, so a new unit gets its report
+  in the same change.
 
 ## Testing
 
-1. `cargo test`: the whole suite — unit, snapshot, golden-program, and differential.
+1. `cargo test`: the whole suite — unit, snapshot, golden-program, differential, and generated.
 2. `cargo test --test differential`: the clang-oracle suite alone. Each program is its own test, so
    `cargo test --test differential -- arrays` scopes to one area.
 3. `cargo test --lib`: the fast in-crate unit tests, no compilation or linking of C.
-4. `cargo insta review`: triage snapshot diffs interactively; `cargo insta accept` after verifying
+4. `cargo test --test generated`: random well-typed programs through the same comparison.
+    - `RUSTYCC_GENERATED_PROGRAMS=2000` runs more of them; `RUSTYCC_GENERATED_SEED=<n>` starts from
+      the seed a failure printed, which reproduces its program byte for byte.
+5. `cargo insta review`: triage snapshot diffs interactively; `cargo insta accept` after verifying
    the change is intended. Never accept a snapshot you have not read.
-5. `cargo +nightly fuzz run lex`: one fuzz target; also `parse` and `frontend`. Run at least 15
-   minutes per target before calling a front-end phase done.
-6. `RUSTYCC_KEEP_TEMPS=1 cargo test --test differential`: retain the generated `.s` for a failing
-   program so it can be inspected.
+6. `./scripts/fuzz.sh lex`: one fuzz target, for the 15 minutes per target required before a
+   front-end change is called done; also `parse` and `frontend`. The script seeds the run from the
+   programs already in the repository, so nothing has to be copied under `fuzz/` by hand. Needs
+   `rustup toolchain install nightly && cargo install cargo-fuzz`.
+7. `RUSTYCC_DIFF_TIMEOUT_SECS=30 cargo test --test differential`: raise the wall-clock limit a
+   compiled program is given, on a slow or heavily loaded machine.
 
 A failing differential test is a compiler bug until proven otherwise. Do not adjust the expectation
-or move the program out of the corpus to make the suite green — `clang` is the oracle.
+or move the program out of the corpus to make the suite green — `clang` is the oracle. A failure
+names a directory holding both binaries, both captures of their output, and the emitted assembly, so
+it can be taken apart without being reproduced first.
+
+Adding a program to `tests/programs/` needs nothing but the file and its row in `COVERAGE.md`:
+`build.rs` reads the directory and generates the list of tests. A program `clang` warns about under
+`-Wall -Wextra` declares that warning in a `// clang-warns:` header, and a test holds the declared
+set and the reported set to matching in both directions.
 
 ## Style
 

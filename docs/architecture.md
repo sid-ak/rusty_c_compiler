@@ -292,7 +292,13 @@ rusty_c_compiler/
 ├── rust-toolchain.toml         # pinned stable toolchain
 ├── mkdocs.yml                  # documentation site config
 ├── requirements-docs.txt       # documentation site dependencies
-├── .github/workflows/ci.yml    # fmt, clippy, test, differential; scheduled fuzz
+├── .github/workflows/
+│   ├── ci.yml                  # fmt, clippy, test, differential, docs — on every pull request
+│   └── nightly.yml             # the long runs: fuzzing, and a large generated corpus
+├── scripts/
+│   ├── build-docs.sh           # the prose site and the API reference, as CI builds them
+│   ├── fuzz.sh                 # one fuzz target for a fixed time, seeded from the repository
+│   └── phase_diagrams.py       # phase-N.svg, generated from architecture.svg
 ├── grammar/
 │   └── syntax.ebnf             # the language subset grammar — embedded, not duplicated, into architecture.md
 ├── docs/
@@ -335,14 +341,22 @@ rusty_c_compiler/
 │   │   ├── COVERAGE.md         # feature-to-program matrix; a program without a row fails CI
 │   │   └── invalid/            # programs that must be rejected, with the rule each violates
 │   ├── adversarial/            # inputs aimed at the front end's failure modes, not its features
+│   ├── harness/                # build both ways, run under a timeout, compare — shared plumbing
+│   │   └── fixtures/           # inputs for the harness's own tests, not members of the corpus
+│   ├── generator/              # the seeded random program generator
 │   ├── lexer_snapshots.rs
 │   ├── parser_snapshots.rs
-│   ├── parser_no_panic.rs      # truncation corpus: every corpus program cut short at every byte
-│   ├── sema_errors.rs
-│   ├── codegen_exec.rs
+│   ├── frontend_no_panic.rs    # truncation corpus, the adversarial set, and past fuzz crashes
+│   ├── sema_snapshots.rs
+│   ├── invalid_programs.rs     # the programs that must be rejected, and the rule each one names
+│   ├── codegen_exec.rs         # the golden tier: each program against the answer in its header
+│   ├── codegen_programs.rs     # small programs compiled, run, and checked, one behavior each
 │   ├── codegen_snapshots.rs
-│   └── differential.rs         # the clang oracle harness
+│   ├── differential.rs         # the clang oracle harness
+│   ├── generated.rs            # the same comparison, over randomly generated programs
+│   └── harness_self_tests.rs   # the harness's own faults, injected on every axis
 └── fuzz/
+    ├── regressions/            # minimized fuzz crashes, run by cargo test rather than by fuzzing
     └── fuzz_targets/
         ├── lex.rs
         ├── parse.rs

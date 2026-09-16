@@ -22,27 +22,40 @@ The four commands CI runs, in the order that fails fastest.
 2. `cargo clippy --all-targets -- -D warnings`: includes the no-unwrap/expect/panic/indexing denials
    for `src/`. Test code is exempt via `clippy.toml`, but only inside `#[test]` bodies — a helper in
    a `tests/*.rs` file needs the file-level `#![allow(clippy::expect_used)]` those files carry.
-3. `cargo test`: 361 tests across eleven binaries.
+3. `cargo test`: the whole suite, about a minute on an M1 — most of it spent in `clang`, since the
+   program tiers compile and run every corpus program two and three times over.
 4. `uv run mkdocs build --strict`: fails on a broken link or a page missing from `nav`. The red
    MkDocs 2.0 block is an advisory banner from mkdocs-material, not an error — read the last line.
 
 ## Narrower test runs
 
-| Command | Scope | Tests |
-| --- | --- | --- |
-| `cargo test --lib` | in-crate units; no C compiled, no processes spawned | 254 |
-| `cargo test --test cli` | usage, exit codes, `--check`, and the driver's flags and temp files | 13 |
-| `cargo test --test codegen_exec` | every corpus program compiled, run, and checked against clang's answer | 9 |
-| `cargo test --test codegen_programs` | ~200 small C programs through the whole pipeline, plus per-construct snapshots | 42 |
-| `cargo test --test codegen_snapshots` | the emitter's output, and that an assembler accepts it | 7 |
-| `cargo test --test lexer_snapshots` | full token stream for a representative program | 1 |
-| `cargo test --test parser_snapshots` | AST for every corpus program, and the coverage matrix | 10 |
-| `cargo test --test parser_no_panic` | every corpus program cut short at every byte, plus `tests/adversarial/` | 8 |
-| `cargo test --test runtime_shim` | compiles, links, runs C against the real `shim.o` | 6 |
-| `cargo test --test sema_snapshots` | annotations for every corpus program, and that each analyzes | 8 |
-| `cargo test --test invalid_programs` | every rejection rule, and what clang makes of it | 7 |
-| `cargo test --lib precedence` | any substring filters by test name | 1 |
-| `cargo test -- --nocapture` | show `println!` from passing tests | — |
+| Command | Scope |
+| --- | --- |
+| `cargo test --lib` | in-crate units; no C compiled, no processes spawned |
+| `cargo test --test cli` | usage, exit codes, `--check`, and the driver's flags and temp files |
+| `cargo test --test differential` | every corpus program under both compilers, run and compared |
+| `cargo test --test codegen_exec` | every corpus program against the answer recorded in its header |
+| `cargo test --test codegen_programs` | ~200 small C programs through the whole pipeline |
+| `cargo test --test codegen_snapshots` | the emitter's output, and that an assembler accepts it |
+| `cargo test --test generated` | randomly generated programs through the same comparison |
+| `cargo test --test harness_self_tests` | the differential harness, broken on purpose one axis at a time |
+| `cargo test --test lexer_snapshots` | full token stream for a representative program |
+| `cargo test --test parser_snapshots` | AST for every corpus program, and the coverage matrix |
+| `cargo test --test frontend_no_panic` | truncations, `tests/adversarial/`, and past fuzz crashes |
+| `cargo test --test runtime_shim` | compiles, links, runs C against the real `shim.o` |
+| `cargo test --test sema_snapshots` | annotations for every corpus program, and that each analyzes |
+| `cargo test --test invalid_programs` | every rejection rule, and what clang makes of it |
+| `cargo test --test differential -- arrays` | one corpus program, since each is its own test |
+| `cargo test --lib precedence` | any substring filters by test name |
+| `cargo test -- --nocapture` | show `println!` from passing tests |
+
+Three environment variables change what the program tiers do:
+
+| Variable | Effect |
+| --- | --- |
+| `RUSTYCC_DIFF_TIMEOUT_SECS` | the wall-clock limit a compiled program is given; default 10 |
+| `RUSTYCC_GENERATED_PROGRAMS` | how many programs the generator writes; default 40 |
+| `RUSTYCC_GENERATED_SEED` | the seed to start from, which reproduces a reported failure exactly |
 
 ## Manual: things that should work
 
@@ -566,8 +579,10 @@ clang -O0 -std=c99 tests/programs/sorting.c "$SHIM" -o /tmp/oracle
 diff <(/tmp/oracle) <(/tmp/ours) && echo "identical"
 ```
 
-`identical`. This is Phase 5's differential test done once by hand; `cargo test --test codegen_exec`
-does the recorded-expectation version of it for every program in the corpus.
+`identical`. This is what `cargo test --test differential` does for every program in the corpus, one
+test each; `cargo test --test codegen_exec` does the recorded-expectation version of the same thing.
+When the automated one fails, its message names a directory holding both binaries, both captures of
+their output, and the assembly `rustycc` produced.
 
 ### 19. Keep the intermediates
 
@@ -610,35 +625,63 @@ unsigned arithmetic. A naive implementation prints something wrong here rather t
 
 ## The test corpus
 
-`tests/programs/` holds five valid subset-C programs, one per feature area. They are the parser's
-snapshots now, the golden programs in Phase 4, and the differential corpus in Phase 5, so a program
-added there earns its keep three times.
+`tests/programs/` holds sixty-four valid subset-C programs. Each one is the parser's snapshot, the
+analyzer's snapshot, a golden program, and a differential comparison, so a program added there earns
+its keep four times.
 
-1. `ls tests/programs/`: `arithmetic.c`, `control_flow.c`, `functions.c`, `arrays.c`, `strings.c`,
-   and `COVERAGE.md`.
-2. `./target/debug/rustycc tests/programs/arrays.c --dump-ast`: any of them, by hand.
+1. `ls tests/programs/ | wc -l`: the corpus, plus `COVERAGE.md` and `invalid/`.
+2. `./target/debug/rustycc tests/programs/bubble_sort.c --dump-ast`: any of them, by hand.
 3. Adding one means adding a row to `tests/programs/COVERAGE.md` in the same change. A program with
    no row fails `cargo test --test parser_snapshots`, on the grounds that a corpus nobody wrote
    down the purpose of stops being a record of coverage and becomes a pile of files.
+4. Nothing else has to be edited. `build.rs` reads the directory and generates the list of tests, so
+   a program cannot be added and silently never run.
+5. A program that provokes a `clang` warning under `-Wall -Wextra` declares it in a
+   `// clang-warns:` header, and `cargo test --test differential` fails if the declared set and the
+   reported set ever stop matching — in either direction.
 
 `tests/adversarial/` is the other half: inputs aimed at how the front end breaks rather than at what
 it supports — nesting deep enough to exhaust the stack, a file of nothing but operators, a 60 KB
 identifier, a file with no tokens at all. They are checked in rather than generated so that a crash
 found once can never come back unnoticed.
 
+## Fuzzing
+
+Needs a toolchain the compiler itself does not: `rustup toolchain install nightly` and
+`cargo install cargo-fuzz`, once.
+
+1. `./scripts/fuzz.sh lex`: fifteen minutes on the lexer — the documented minimum before a front-end
+   change is called done. Also `parse` and `frontend`.
+2. `./scripts/fuzz.sh parse 60`: a shorter run, to check the target still builds.
+3. The seed corpus is assembled by the script from `tests/programs/`, `tests/programs/invalid/`,
+   `tests/adversarial/`, and `fuzz/regressions/`, so nothing has to be copied under `fuzz/` by hand.
+4. `cargo +nightly fuzz run lex fuzz/artifacts/lex/<file>`: replay a crash it reported.
+5. `cargo +nightly fuzz tmin lex fuzz/artifacts/lex/<file>`: minimize it. The result belongs in
+   `fuzz/regressions/`, where `cargo test --test frontend_no_panic` runs it from then on.
+
+## Reports
+
+1. `./scripts/test-evidence.sh`: regenerates the toolchain capture and the full-run capture the unit
+   test reports cite, into `docs/reports/unit_tests/evidence/`.
+2. `python3 scripts/test_inventory.py`: refreshes the table of tests in each unit test report from
+   the tests' own doc comments.
+3. `python3 scripts/test_inventory.py --check`: what the docs build runs. Fails if a table is stale,
+   if two reports claim the same file of tests, or if a file of tests has no report at all.
+
 ## Snapshots
 
-1. `cargo install cargo-insta`: not installed yet. Without it a changed snapshot still fails the
+1. `cargo install cargo-insta`: optional. Without it a changed snapshot still fails the
    test and writes a `.snap.new` beside the old one to diff by hand;
    `INSTA_UPDATE=always cargo test` rewrites the `.snap` files in place, which is the same thing
    with the reviewing step left to `git diff`.
 2. `cargo insta review`: step through diffs interactively. Read the whole snapshot before accepting
    — the AST for `control_flow.c` is 350 lines and a branch attached to the wrong `if` looks like a
    right one at a glance.
-3. `ls tests/snapshots/`: six files — the token stream for the lexer's representative program, and
-   the AST for each of the five corpus programs. Two smaller formats are pinned by inline snapshots
-   next to the code that produces them instead: the diagnostic rendering in `src/diagnostics.rs`,
-   and a dump with spans on in `tests/parser_snapshots.rs`.
+3. `ls tests/snapshots/`: the token stream for the lexer's representative program, the AST and the
+   annotations for the original feature-area programs, and the emitted assembly for each construct.
+   Two smaller formats are pinned by inline snapshots next to the code that produces them instead:
+   the diagnostic rendering in `src/diagnostics.rs`, and a dump with spans on in
+   `tests/parser_snapshots.rs`.
 
 ## Docs and branch review
 

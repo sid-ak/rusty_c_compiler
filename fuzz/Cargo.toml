@@ -1,0 +1,59 @@
+# The fuzz targets, as their own crate.
+#
+# Separate from the compiler because `cargo-fuzz` needs a nightly toolchain and a sanitizer-
+# instrumented build, and the compiler itself is pinned to stable. Keeping them apart means nightly
+# is a requirement of fuzzing rather than of building, and `rust-toolchain.toml`'s pin stays the
+# contract for everything else.
+#
+# This crate is excluded from the workspace above it, which is what `cargo-fuzz` expects and what
+# keeps `cargo build` at the repo root from reaching for a toolchain it does not need.
+
+[package]
+name = "rustycc-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Its own workspace root. The compiler's `Cargo.toml` is not a workspace, and a package nested
+# inside another package's directory is otherwise taken to be a member of one — which is an error
+# rather than a guess cargo is willing to make.
+[workspace]
+members = ["."]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.rustycc]
+path = ".."
+
+[[bin]]
+name = "lex"
+path = "fuzz_targets/lex.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse"
+path = "fuzz_targets/parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frontend"
+path = "fuzz_targets/frontend.rs"
+test = false
+doc = false
+bench = false
+
+# Release-shaped, because a fuzzer spends all of its time in this code and a debug build would find
+# a fraction as much in the same wall clock. Debug assertions stay on: an assertion that fires is a
+# crash, which is exactly what the fuzzer is looking for.
+[profile.release]
+debug = 1
+debug-assertions = true
+overflow-checks = true
