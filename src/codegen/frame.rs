@@ -516,11 +516,14 @@ fn width_for(size: u64) -> Width {
     }
 }
 
-/// The register holding an incoming argument at `position`, named for the width it is stored at.
+/// The register holding an argument at `position`, named for the width it is moved at.
 ///
-/// A `w` register is the low half of an `x` register, so storing eight bytes has to name the `x`
-/// form or only four of them are real.
-fn argument_register(position: usize, width: Width) -> String {
+/// On ARM64 it is the register name and not the mnemonic that fixes the width: `ldr`/`str` are
+/// spelled the same for four bytes and eight, and `w8` is the low half of `x8`. Naming the `w` form
+/// for an eight-byte value therefore moves four of them and leaves the rest as whatever was there.
+/// Shared with the caller side, so the two halves of a stack-passed argument cannot disagree about
+/// how wide it is.
+pub(crate) fn argument_register(position: usize, width: Width) -> String {
     match width {
         Width::Double => format!("x{position}"),
         Width::Byte | Width::Word => format!("w{position}"),

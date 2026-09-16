@@ -48,18 +48,23 @@ Each program also carries the exit code and stdout it should produce, in an `// 
 | Nested blocks and the empty statement | `control_flow.c` |
 | Function definitions and calls | `functions.c` |
 | Forward declarations | `functions.c`, `arrays.c`, `strings.c` |
-| Recursion, single and double | `functions.c` |
+| Recursion, single and double | `functions.c`, `recursion.c` |
+| Mutual recursion | `recursion.c` |
+| Recursion nested inside an argument list | `recursion.c` |
 | `void` return and `(void)` parameter lists | `functions.c` |
 | Eight and nine parameters | `functions.c` |
 | Array declaration and indexing | `arrays.c` |
 | Array initializer lists, full and partial | `arrays.c` |
 | Array parameters `int a[]` | `arrays.c`, `strings.c` |
-| Writing through an index | `arrays.c` |
+| Writing through an index | `arrays.c`, `sorting.c` |
+| An array mutated in place through a helper | `arrays.c`, `sorting.c`, `recursion.c` |
+| Swapping, reversing, and sorting an array | `sorting.c` |
+| Nested loops over one array | `sorting.c` |
 | String literals as arguments | `strings.c` |
 | `char` array initialized from a string literal | `strings.c` |
 | Escape sequences | `strings.c` |
 | The null terminator | `strings.c` |
-| The runtime shim's three functions | all five |
+| The runtime shim's three functions | every program |
 
 ## Not yet covered
 

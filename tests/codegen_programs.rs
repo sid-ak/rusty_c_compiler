@@ -640,6 +640,48 @@ fn arguments_arrive_at_every_arity() {
     }
 }
 
+/// A pointer passed on the stack arrives whole, and does not misalign what follows it.
+///
+/// Eight bytes, not four. On ARM64 the register name fixes the width — `ldr`/`str` are spelled the
+/// same for a word and a doubleword, and `w8` is the low half of `x8` — so naming the `w` form for
+/// an address writes half of it and leaves the rest as whatever was there. The width also has to
+/// come from the type after decay, since the source writes an array and the callee receives an
+/// address.
+#[test]
+fn a_pointer_passed_on_the_stack_arrives_whole() {
+    let cases = [
+        (
+            "an array as the ninth argument",
+            "int ninth(int a,int b,int c,int d,int e,int g,int h,int i,int values[]) { return values[0] + values[1]; }\nint answer(void) { int a[2]; a[0] = 40; a[1] = 2; return ninth(1,2,3,4,5,6,7,8,a); }",
+            "42",
+        ),
+        (
+            "an already-decayed parameter forwarded to a stack position",
+            "int ninth(int a,int b,int c,int d,int e,int g,int h,int i,int values[]) { return values[0]; }\nint forward(int values[]) { return ninth(1,2,3,4,5,6,7,8,values); }\nint answer(void) { int a[1]; a[0] = 7; return forward(a); }",
+            "7",
+        ),
+        (
+            "an int after a pointer, which a mis-sized pointer would misalign",
+            "int tenth(int a,int b,int c,int d,int e,int g,int h,int i,int values[],int last) { return values[0] * 100 + last; }\nint answer(void) { int a[1]; a[0] = 3; return tenth(1,2,3,4,5,6,7,8,a,9); }",
+            "309",
+        ),
+        (
+            "two pointers on the stack",
+            "int both(int a,int b,int c,int d,int e,int g,int h,int i,int x[],int y[]) { return x[0] * 10 + y[0]; }\nint answer(void) { int p[1]; int q[1]; p[0] = 4; q[0] = 2; return both(1,2,3,4,5,6,7,8,p,q); }",
+            "42",
+        ),
+        (
+            "a char after a pointer, packed at its natural size",
+            "int mixed(int a,int b,int c,int d,int e,int g,int h,int i,int values[],char c2) { return values[0] + c2; }\nint answer(void) { int a[1]; a[0] = 1; return mixed(1,2,3,4,5,6,7,8,a,'A'); }",
+            "66",
+        ),
+    ];
+
+    for (shape, source, expected) in cases {
+        assert_eq!(answer_of(&slug(shape), source), expected, "{shape}");
+    }
+}
+
 /// An argument that is itself a call does not clobber an argument already evaluated.
 ///
 /// Proved through the returned value rather than through observable order: C leaves the order in

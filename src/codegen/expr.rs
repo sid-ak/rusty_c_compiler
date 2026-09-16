@@ -18,6 +18,7 @@
 
 use crate::ast::{BinOp, Expr, ExprKind, IncDec, UnOp};
 use crate::codegen::emit::Width;
+use crate::codegen::frame::argument_register;
 use crate::codegen::{element_stride, Generator};
 use crate::diagnostics::Span;
 use crate::sema::scope::SymbolKind;
@@ -412,13 +413,21 @@ impl Generator<'_> {
             // Apple's ARM64 platforms pack stack arguments at their natural size and alignment
             // rather than giving each one eight bytes, so the width the callee will read with is
             // the width this has to be written with.
-            let width = self.width_of(arg.id);
+            //
+            // The width comes from the type *after* any conversion, not the one the source wrote.
+            // An array decaying at a call site is written `int a[2]` and arrives as an eight-byte
+            // address, and taking the declared type would move four bytes of it and misalign
+            // everything after it.
+            let width = self.converted_width_of(arg.id);
             let size = element_stride(width);
             stack_cursor = align_up(stack_cursor, size);
 
-            self.emitter.load_from_frame("w8", width, slot);
-            self.emitter
-                .instruction(&format!("{} w8, [sp, #{stack_cursor}]", width.store()));
+            let register = argument_register(8, width);
+            self.emitter.load_from_frame(&register, width, slot);
+            self.emitter.instruction(&format!(
+                "{} {register}, [sp, #{stack_cursor}]",
+                width.store()
+            ));
             stack_cursor = stack_cursor.saturating_add(size);
         }
     }
@@ -435,17 +444,17 @@ impl Generator<'_> {
         self.emitter.address_of("x0", &label);
     }
 
-    /// The access width for the value at `node`.
+    /// The access width for the value at `node`, as the source declared it.
     pub(crate) fn width_of(&self, node: crate::ast::NodeId) -> Width {
-        match self.annotations.type_of(node) {
-            Some(Ty::Char) => Width::Byte,
-            Some(Ty::Ptr(_)) => Width::Double,
-            Some(Ty::Array(element, _)) => match element.as_ref() {
-                Ty::Char => Width::Byte,
-                _ => Width::Word,
-            },
-            _ => Width::Word,
-        }
+        width_for(self.annotations.type_of(node))
+    }
+
+    /// The access width for the value at `node` once any recorded conversion has been applied.
+    ///
+    /// This is what a use site actually receives, which is not always what the source wrote: an
+    /// array at an argument position was recorded as decaying, so it arrives as an address.
+    pub(crate) fn converted_width_of(&self, node: crate::ast::NodeId) -> Width {
+        width_for(self.annotations.converted_type_of(node).as_ref())
     }
 
     /// The access width of one element of the array declared at `node`.
@@ -468,6 +477,23 @@ impl Generator<'_> {
             Ty::Ptr(_) => Width::Double,
             _ => Width::Word,
         }
+    }
+}
+
+/// The access width a value of `ty` moves at.
+///
+/// An array is measured by its element, because an array is only ever moved one element at a time;
+/// a pointer is eight bytes whatever it points at.
+fn width_for(ty: Option<&Ty>) -> Width {
+    match ty {
+        Some(Ty::Char) => Width::Byte,
+        Some(Ty::Ptr(_)) => Width::Double,
+        Some(Ty::Array(element, _)) => match element.as_ref() {
+            Ty::Char => Width::Byte,
+            Ty::Ptr(_) => Width::Double,
+            _ => Width::Word,
+        },
+        _ => Width::Word,
     }
 }
 
