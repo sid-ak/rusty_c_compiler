@@ -275,8 +275,8 @@ fn a_redeclaration_names_the_declaration_it_collides_with() {
 
     assert_eq!(diagnostic.message, "redeclaration of 'value' in this scope");
     assert_eq!(
-        diagnostic.notes,
-        vec!["previous declaration of 'value' is here".to_owned()]
+        diagnostic.note_messages(),
+        ["previous declaration of 'value' is here"]
     );
 }
 
@@ -501,4 +501,366 @@ fn deeply_nested_program(template: &Program, ids: &mut NodeIds, nesting: usize) 
     }
 
     program
+}
+
+// -- The rule table -----------------------------------------------------------------------------
+
+/// One semantic rule, with a program that obeys it and one that breaks it.
+///
+/// Every check the analyzer performs has a row here, so the positive case, the negative case, the
+/// message, and the span are all stated once and exercised by the two tests below rather than by a
+/// hand-written pair per rule.
+struct Rule {
+    /// What the rule is, reported when a row fails.
+    name: &'static str,
+    /// A program the rule accepts, which must analyze with no diagnostics at all.
+    legal: &'static str,
+    /// A program that breaks the rule, which must produce exactly one diagnostic.
+    illegal: &'static str,
+    /// The message that diagnostic carries.
+    message: &'static str,
+    /// The source text the diagnostic points at, taken from `illegal` by the reported span.
+    points_at: &'static str,
+}
+
+/// Declarations of the runtime shim, for rules whose fixtures need something to call.
+const SHIM: &str = "void print_int(int n);\nvoid print_string(char s[]);\n";
+
+/// Every rule the analyzer enforces.
+const RULES: &[Rule] = &[
+    Rule {
+        name: "undeclared identifier",
+        legal: "int main(void) { int x; x = 1; return x; }",
+        illegal: "int main(void) { return x; }",
+        message: "undeclared identifier 'x'",
+        points_at: "x",
+    },
+    Rule {
+        name: "undeclared function",
+        legal: "int helper(void) { return 1; }\nint main(void) { return helper(); }",
+        illegal: "int main(void) { return helper(); }",
+        message: "undeclared identifier 'helper'",
+        points_at: "helper",
+    },
+    Rule {
+        name: "use before declaration in the same scope",
+        legal: "int main(void) { int x; x = 1; return x; }",
+        illegal: "int main(void) { x = 1; int x; return x; }",
+        message: "undeclared identifier 'x'",
+        points_at: "x",
+    },
+    Rule {
+        name: "redeclaration in the same scope",
+        legal: "int main(void) { int x; { int x; x = 1; } return x; }",
+        illegal: "int main(void) { int x; int x; return x; }",
+        message: "redeclaration of 'x' in this scope",
+        points_at: "x",
+    },
+    Rule {
+        name: "conflicting redeclaration of a function signature",
+        legal: "int helper(int a);\nint helper(int a);\nint main(void) { return helper(1); }",
+        illegal: "int helper(int a);\nchar helper(int a);\nint main(void) { return helper(1); }",
+        message: "conflicting declaration of 'helper'",
+        points_at: "helper",
+    },
+    Rule {
+        name: "a definition disagreeing with an earlier declaration",
+        legal: "int helper(int a);\nint helper(int a) { return a; }",
+        illegal: "int helper(int a);\nint helper(char a) { return a; }",
+        message: "conflicting declaration of 'helper'",
+        points_at: "helper",
+    },
+    Rule {
+        name: "multiple definitions of one function",
+        legal: "int helper(void);\nint helper(void) { return 1; }",
+        illegal: "int helper(void) { return 1; }\nint helper(void) { return 2; }",
+        message: "redefinition of 'helper'",
+        points_at: "helper",
+    },
+    Rule {
+        name: "call arity mismatch",
+        legal: "int add(int a, int b) { return a + b; }\nint main(void) { return add(1, 2); }",
+        illegal: "int add(int a, int b) { return a + b; }\nint main(void) { return add(1); }",
+        message: "'add' takes 2 arguments, but 1 was passed",
+        points_at: "add(1)",
+    },
+    Rule {
+        name: "call argument type mismatch",
+        legal: "int sum(int values[], int count);\nint main(void) { int a[2]; return sum(a, 2); }",
+        illegal: "int sum(int values[], int count);\nint main(void) { return sum(1, 2); }",
+        message: "argument 1 of 'sum' has type 'int', but 'int *' was expected",
+        points_at: "1",
+    },
+    Rule {
+        name: "calling a non-function",
+        legal: "int helper(void) { return 1; }\nint main(void) { return helper(); }",
+        illegal: "int main(void) { int helper; return helper(); }",
+        message: "called object is not a function",
+        points_at: "helper()",
+    },
+    Rule {
+        name: "using a function name as a value",
+        legal: "int helper(void) { return 1; }\nint main(void) { return helper(); }",
+        illegal: "int helper(void) { return 1; }\nint main(void) { return helper; }",
+        message: "'helper' is a function; it can only be called",
+        points_at: "helper",
+    },
+    Rule {
+        name: "return with a value in a void function",
+        legal: "void nothing(void) { return; }",
+        illegal: "void nothing(void) { return 1; }",
+        message: "'return' with a value in a function returning 'void'",
+        points_at: "return 1;",
+    },
+    Rule {
+        name: "bare return in a non-void function",
+        legal: "int one(void) { return 1; }",
+        illegal: "int one(void) { return; }",
+        message: "'return' with no value in a function returning 'int'",
+        points_at: "return;",
+    },
+    Rule {
+        name: "control reaching the end of a non-void function",
+        legal: "int one(void) { return 1; }",
+        illegal: "int one(void) { int x; x = 1; }",
+        message: "control reaches the end of non-void function 'one'",
+        points_at: "}",
+    },
+    Rule {
+        name: "indexing a non-array and non-pointer",
+        legal: "int main(void) { int a[2]; a[0] = 1; return a[0]; }",
+        illegal: "int main(void) { int a; return a[0]; }",
+        message: "subscripted value is not an array or a pointer",
+        points_at: "a[0]",
+    },
+    Rule {
+        name: "non-integer subscript",
+        legal: "int main(void) { int a[2]; int i; i = 0; return a[i]; }",
+        illegal: "int main(void) { int a[2]; int b[2]; return a[b]; }",
+        message: "array subscript is not an integer",
+        points_at: "b",
+    },
+    Rule {
+        name: "an array used in arithmetic",
+        legal: "int main(void) { int a[2]; return a[0] + 1; }",
+        illegal: "int main(void) { int a[2]; return a + 1; }",
+        message: "invalid operands to binary '+': 'int[2]' and 'int'",
+        points_at: "a + 1",
+    },
+    Rule {
+        name: "an array used as a condition",
+        legal: "int main(void) { int a[2]; if (a[0]) { return 1; } return 0; }",
+        illegal: "int main(void) { int a[2]; if (a) { return 1; } return 0; }",
+        message: "value of type 'int[2]' is not a condition",
+        points_at: "a",
+    },
+    Rule {
+        name: "assigning to an array name",
+        legal: "int main(void) { int a[2]; a[0] = 1; return a[0]; }",
+        illegal: "int main(void) { int a[2]; int b[2]; a = b; return 0; }",
+        message: "array name is not assignable",
+        points_at: "a",
+    },
+    Rule {
+        name: "void as a variable type",
+        legal: "int value;\nint main(void) { return value; }",
+        illegal: "void value;\nint main(void) { return 0; }",
+        message: "variable has incomplete type 'void'",
+        points_at: "value",
+    },
+    Rule {
+        name: "void as a parameter type",
+        legal: "int helper(int a);\nint main(void) { return helper(1); }",
+        illegal: "int helper(void a);\nint main(void) { return 0; }",
+        message: "parameter has incomplete type 'void'",
+        points_at: "a",
+    },
+    Rule {
+        name: "an array of void",
+        legal: "char letters[3];\nint main(void) { return letters[0]; }",
+        illegal: "void letters[3];\nint main(void) { return 0; }",
+        message: "array has incomplete element type 'void'",
+        points_at: "letters",
+    },
+    Rule {
+        name: "a zero-length array",
+        legal: "int main(void) { int a[1]; a[0] = 1; return a[0]; }",
+        illegal: "int main(void) { int a[0]; return 0; }",
+        message: "array size must be greater than zero",
+        points_at: "a",
+    },
+    Rule {
+        name: "an array initializer longer than the array",
+        legal: "int a[3] = {1, 2, 3};\nint main(void) { return a[0]; }",
+        illegal: "int a[2] = {1, 2, 3};\nint main(void) { return a[0]; }",
+        message: "3 initializers for an array of 2",
+        points_at: "{1, 2, 3}",
+    },
+    Rule {
+        name: "a non-constant global initializer",
+        legal: "int value = 2 * 3;\nint main(void) { return value; }",
+        illegal:
+            "int seed(void) { return 1; }\nint value = seed();\nint main(void) { return value; }",
+        message: "global initializer is not a constant",
+        points_at: "seed()",
+    },
+    Rule {
+        name: "break outside a loop",
+        legal: "int main(void) { while (1) { break; } return 0; }",
+        illegal: "int main(void) { break; return 0; }",
+        message: "'break' outside of a loop",
+        points_at: "break;",
+    },
+    Rule {
+        name: "continue outside a loop",
+        legal: "int main(void) { while (1) { continue; } }",
+        illegal: "int main(void) { continue; return 0; }",
+        message: "'continue' outside of a loop",
+        points_at: "continue;",
+    },
+];
+
+/// Every rule's legal program analyzes with no diagnostics at all.
+///
+/// The positive half matters as much as the negative one: a check written too broadly passes every
+/// negative test while rejecting programs it should accept, and only this test notices.
+#[test]
+fn every_rule_accepts_its_legal_program() {
+    for rule in RULES {
+        let source = format!("{SHIM}{}", rule.legal);
+
+        assert_eq!(
+            messages(&source),
+            Vec::<String>::new(),
+            "the legal program for `{}` was rejected",
+            rule.name
+        );
+    }
+}
+
+/// Every rule's illegal program produces exactly its message, pointing at exactly its source text.
+#[test]
+fn every_rule_rejects_its_illegal_program_at_the_right_span() {
+    for rule in RULES {
+        let source = format!("{SHIM}{}", rule.illegal);
+        let diagnostics = analyze_source(&source).diagnostics;
+
+        let [diagnostic] = diagnostics.as_slice() else {
+            panic!(
+                "`{}`: expected exactly one diagnostic, got {:?}",
+                rule.name,
+                diagnostics
+                    .iter()
+                    .map(|diagnostic| &diagnostic.message)
+                    .collect::<Vec<_>>()
+            );
+        };
+
+        assert_eq!(
+            diagnostic.message, rule.message,
+            "message for `{}`",
+            rule.name
+        );
+        assert_eq!(
+            source.get(diagnostic.span.start..diagnostic.span.end),
+            Some(rule.points_at),
+            "span for `{}`",
+            rule.name
+        );
+    }
+}
+
+/// Every rule in the table is distinct, so a row cannot be silently duplicated instead of added.
+#[test]
+fn the_rule_table_has_no_duplicate_rows() {
+    let mut names: Vec<&str> = RULES.iter().map(|rule| rule.name).collect();
+    let before = names.len();
+    names.sort_unstable();
+    names.dedup();
+
+    assert_eq!(names.len(), before, "duplicate rule names in the table");
+}
+
+/// A redeclaration's note points at the declaration it collides with, rather than only saying so.
+#[test]
+fn a_collision_note_points_at_the_earlier_declaration() {
+    let source = "int main(void) { int value; int value; return value; }";
+    let diagnostics = analyze_source(source).diagnostics;
+    let [diagnostic] = diagnostics.as_slice() else {
+        panic!("expected exactly one diagnostic, got {diagnostics:?}");
+    };
+
+    let [note] = diagnostic.notes.as_slice() else {
+        panic!("expected exactly one note, got {:?}", diagnostic.notes);
+    };
+    let span = note
+        .span
+        .expect("the note points at the earlier declaration");
+
+    assert_eq!(source.get(span.start..span.end), Some("value"));
+    assert!(
+        span.start < diagnostic.span.start,
+        "the note points at the earlier of the two declarations"
+    );
+}
+
+/// Control-flow reachability is judged on the shapes that decide it, not on the last statement.
+#[test]
+fn reachability_accepts_only_the_shapes_that_always_return() {
+    let cases = [
+        ("ending in return", "int f(void) { return 1; }", true),
+        (
+            "if/else where both arms return",
+            "int f(int a) { if (a) { return 1; } else { return 2; } }",
+            true,
+        ),
+        (
+            "if with no else",
+            "int f(int a) { if (a) { return 1; } }",
+            false,
+        ),
+        (
+            "while (1) with no return",
+            "int f(void) { while (1) { } }",
+            true,
+        ),
+        (
+            "while (1) escaped by a break",
+            "int f(void) { while (1) { break; } }",
+            false,
+        ),
+        (
+            "while (1) with a break in a nested loop",
+            "int f(void) { while (1) { while (1) { break; } } }",
+            true,
+        ),
+        (
+            "for with no condition",
+            "int f(void) { for (;;) { } }",
+            true,
+        ),
+        (
+            "a loop that can end",
+            "int f(int a) { while (a) { } }",
+            false,
+        ),
+    ];
+
+    for (shape, source, accepted) in cases {
+        let reported = messages(source);
+
+        assert_eq!(reported.is_empty(), accepted, "{shape}: got {reported:?}");
+    }
+}
+
+/// `main` may fall off its end, because C defines an implicit `return 0` there.
+#[test]
+fn main_may_reach_its_closing_brace() {
+    assert_eq!(messages("int main(void) { }"), Vec::<String>::new());
+}
+
+/// A `void` function may reach its closing brace, since it has nothing to return.
+#[test]
+fn a_void_function_may_reach_its_closing_brace() {
+    assert_eq!(messages("void nothing(void) { }"), Vec::<String>::new());
 }

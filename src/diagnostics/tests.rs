@@ -48,7 +48,7 @@ fn notes_attach_without_changing_the_message() {
     assert_eq!(diagnostic.kind, DiagnosticKind::Lex);
     assert_eq!(diagnostic.message, "stray character");
     assert_eq!(diagnostic.span, Span::new(0, 1));
-    assert_eq!(diagnostic.notes, ["delete it", "or quote it"]);
+    assert_eq!(diagnostic.note_messages(), ["delete it", "or quote it"]);
 }
 
 /// Every pass phrases an out-of-subset construct identically, whichever pass noticed it.

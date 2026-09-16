@@ -41,6 +41,12 @@ pub enum Ty {
     Array(Box<Ty>, u32),
     /// A pointer to `pointee`.
     Ptr(Box<Ty>),
+    /// A type analysis could not work out, because it already reported why.
+    ///
+    /// Recovery, not a type any program can write. Every rule below treats it as acceptable, so a
+    /// value whose type was already reported wrong does not collect a second complaint from each
+    /// operator it then flows through. One mistake, one message.
+    Error,
     /// A function taking `params` and returning `ret`.
     Func {
         /// What the function returns.
@@ -139,7 +145,7 @@ impl Ty {
                     align: element.align,
                 })
             }
-            Ty::Void | Ty::Func { .. } => None,
+            Ty::Void | Ty::Error | Ty::Func { .. } => None,
         }
     }
 
@@ -176,8 +182,16 @@ impl Ty {
     }
 
     /// Whether arithmetic may be performed on this type.
+    ///
+    /// [`Ty::Error`] qualifies, as it does everywhere: suppressing the follow-on complaint is the
+    /// whole reason it exists.
     pub fn is_arithmetic(&self) -> bool {
-        matches!(self, Ty::Int | Ty::Char)
+        matches!(self, Ty::Int | Ty::Char | Ty::Error)
+    }
+
+    /// Whether this is the recovery type.
+    pub fn is_error(&self) -> bool {
+        matches!(self, Ty::Error)
     }
 
     /// Whether this type can be tested for truth.
@@ -186,7 +200,7 @@ impl Ty {
     /// condition, and the operands of `&&`, `||`, and `!` — so there is no second predicate for
     /// those to drift away from.
     pub fn is_scalar(&self) -> bool {
-        matches!(self, Ty::Int | Ty::Char | Ty::Ptr(_))
+        matches!(self, Ty::Int | Ty::Char | Ty::Ptr(_) | Ty::Error)
     }
 
     /// The type both operands of an arithmetic or comparison operator are converted to.
@@ -194,6 +208,10 @@ impl Ty {
     /// `None` means the pairing has no common type and the operator does not apply. An array is
     /// one of those pairings: `a + 1` is rejected rather than treated as pointer arithmetic.
     pub fn common_arithmetic(left: &Ty, right: &Ty) -> Option<Ty> {
+        if left.is_error() || right.is_error() {
+            return Some(Ty::Error);
+        }
+
         if left.is_arithmetic() && right.is_arithmetic() {
             Some(Ty::Int)
         } else {
@@ -206,6 +224,10 @@ impl Ty {
     /// The array case is the parameter-passing rule and only that: it reports the decay so the
     /// caller can record it, and says nothing about whether the caller was entitled to ask.
     pub fn assignability(target: &Ty, source: &Ty) -> Assignability {
+        if target.is_error() || source.is_error() {
+            return Assignability::Exact;
+        }
+
         match (target, source) {
             (Ty::Int, Ty::Int) | (Ty::Char, Ty::Char) => Assignability::Exact,
             (Ty::Int, Ty::Char) => Assignability::Converted(Conversion::PromoteCharToInt),
@@ -237,6 +259,7 @@ impl fmt::Display for Ty {
             Ty::Int => write!(formatter, "int")?,
             Ty::Char => write!(formatter, "char")?,
             Ty::Void => write!(formatter, "void")?,
+            Ty::Error => write!(formatter, "<error>")?,
             Ty::Ptr(pointee) => write!(formatter, "{pointee} *")?,
             Ty::Func { ret, params } => {
                 write!(formatter, "{ret}(")?;

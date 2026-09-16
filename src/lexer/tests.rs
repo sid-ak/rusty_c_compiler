@@ -478,7 +478,7 @@ fn unsupported_punctuation_says_what_to_do_instead() {
             .first()
             .unwrap_or_else(|| panic!("expected a diagnostic for {source:?}"));
 
-        assert_eq!(diagnostic.notes, [note], "for {source:?}");
+        assert_eq!(diagnostic.note_messages(), [note], "for {source:?}");
     }
 }
 
@@ -489,7 +489,7 @@ fn integer_overflow_explains_the_limit() {
     let diagnostic = lexed.diagnostics.first().expect("expected a diagnostic");
 
     assert_eq!(
-        diagnostic.notes,
+        diagnostic.note_messages(),
         ["the maximum is 2147483647; write INT_MIN as -2147483647 - 1"]
     );
 }

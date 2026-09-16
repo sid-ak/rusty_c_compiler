@@ -16,6 +16,7 @@ fn sample_types() -> Vec<Ty> {
         Ty::Int,
         Ty::Char,
         Ty::Void,
+        Ty::Error,
         Ty::array(Ty::Int, 10),
         Ty::array(Ty::Char, 3),
         Ty::ptr(Ty::Int),
@@ -33,6 +34,7 @@ fn variant_name(ty: &Ty) -> &'static str {
         Ty::Int => "Int",
         Ty::Char => "Char",
         Ty::Void => "Void",
+        Ty::Error => "Error",
         Ty::Array(_, _) => "Array",
         Ty::Ptr(_) => "Ptr",
         Ty::Func { .. } => "Func",
@@ -46,7 +48,10 @@ fn sample_types_cover_every_variant() {
     covered.sort_unstable();
     covered.dedup();
 
-    assert_eq!(covered, vec!["Array", "Char", "Func", "Int", "Ptr", "Void"]);
+    assert_eq!(
+        covered,
+        vec!["Array", "Char", "Error", "Func", "Int", "Ptr", "Void"]
+    );
 }
 
 /// `char` occupies one byte and `int` four, each aligned to its own size.
@@ -118,6 +123,7 @@ fn unmeasurable_array_layout_reports_none_rather_than_overflowing() {
 #[test]
 fn incomplete_types_have_no_layout() {
     assert_eq!(Ty::Void.layout(), None);
+    assert_eq!(Ty::Error.layout(), None);
     assert_eq!(Ty::func(Ty::Int, vec![]).layout(), None);
     assert_eq!(Ty::array(Ty::Void, 4).layout(), None);
 }
@@ -192,8 +198,10 @@ fn decays_predicate_agrees_with_the_decay_rule() {
 #[test]
 fn arithmetic_and_scalar_classify_every_type() {
     for ty in sample_types() {
-        let arithmetic = matches!(ty, Ty::Int | Ty::Char);
-        let scalar = matches!(ty, Ty::Int | Ty::Char | Ty::Ptr(_));
+        // The recovery type satisfies both, so a value already reported wrong collects no
+        // second complaint from the operator it flows into.
+        let arithmetic = matches!(ty, Ty::Int | Ty::Char | Ty::Error);
+        let scalar = matches!(ty, Ty::Int | Ty::Char | Ty::Ptr(_) | Ty::Error);
 
         assert_eq!(
             ty.is_arithmetic(),
@@ -220,7 +228,9 @@ fn arithmetic_and_scalar_classify_every_type() {
 fn common_arithmetic_type_is_int_for_arithmetic_pairs_only() {
     for left in sample_types() {
         for right in sample_types() {
-            let expected = if left.is_arithmetic() && right.is_arithmetic() {
+            let expected = if left.is_error() || right.is_error() {
+                Some(Ty::Error)
+            } else if left.is_arithmetic() && right.is_arithmetic() {
                 Some(Ty::Int)
             } else {
                 None
@@ -240,6 +250,10 @@ fn common_arithmetic_type_is_int_for_arithmetic_pairs_only() {
 /// Written as a table over the pair rather than delegating to the code under test, so a rule that
 /// changes in the implementation shows up here as a failure rather than agreeing with itself.
 fn expected_assignability(target: &Ty, source: &Ty) -> Assignability {
+    if target.is_error() || source.is_error() {
+        return Assignability::Exact;
+    }
+
     match (target, source) {
         (Ty::Int, Ty::Int) | (Ty::Char, Ty::Char) => Assignability::Exact,
         (Ty::Int, Ty::Char) => Assignability::Converted(Conversion::PromoteCharToInt),
@@ -310,7 +324,7 @@ fn arrays_functions_and_void_are_never_assignable_targets() {
     ];
 
     for target in targets {
-        for source in sample_types() {
+        for source in sample_types().into_iter().filter(|ty| !ty.is_error()) {
             assert_eq!(
                 Ty::assignability(&target, &source),
                 Assignability::Incompatible,
@@ -342,6 +356,7 @@ fn types_print_as_c_spells_them() {
     assert_eq!(Ty::Int.to_string(), "int");
     assert_eq!(Ty::Char.to_string(), "char");
     assert_eq!(Ty::Void.to_string(), "void");
+    assert_eq!(Ty::Error.to_string(), "<error>");
     assert_eq!(Ty::ptr(Ty::Int).to_string(), "int *");
     assert_eq!(Ty::array(Ty::Char, 3).to_string(), "char[3]");
     assert_eq!(
